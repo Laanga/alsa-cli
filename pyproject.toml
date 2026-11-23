@@ -1,0 +1,35 @@
+[project]
+name = "alsa-cli"
+version = "0.1.0"
+description = "JSON-first CLI for Alsa bus timetables and fares. No account needed."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "typer>=0.15",
+    "rich>=13",
+    "curl-cffi>=0.7.4",
+]
+
+[project.scripts]
+alsa = "alsa.cli:main"
+alsa-mcp = "alsa.mcp:main"
+
+[project.optional-dependencies]
+mcp = ["fastmcp>=3.2"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/alsa"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.ruff.lint]
+ignore = ["B008"]
