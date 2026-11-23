@@ -129,5 +129,10 @@ def _print_text(origin: str, destination: str, date: str, journeys: list[Journey
     console.print(Text(f"se muestran {len(journeys)} buses", "dim"))
 
 
+app = typer.Typer(add_completion=False)
+app.command()(bus)
+app.command()(stations)
+
+
 def main() -> None:
-    typer.run(bus)
+    app()

@@ -192,13 +192,10 @@ def _parse_journeys(data: dict) -> list[Journey]:
 
 
 def get_stations(query: str = "") -> list[dict]:
-    """Busca estaciones de Alsa por nombre (autocomplete del endpoint público).
+    """Busca estaciones de Alsa por nombre (filtrado local).
 
-    Args:
-        query: texto parcial del nombre de la estación (p. ej. "mad", "tole").
-
-    Returns:
-        Lista de dicts con id, name, province, simplified_name.
+    El endpoint de Alsa devuelve todas las paradas; el filtrado lo hace
+    el JavaScript de su web en el navegador. Aquí lo hacemos en Python.
     """
     session = curl_requests.Session()
     session.impersonate = "chrome"
@@ -212,7 +209,7 @@ def get_stations(query: str = "") -> list[dict]:
     )
 
     try:
-        resp = session.post(origins_url, data={"text": query}, timeout=REQUEST_TIMEOUT)
+        resp = session.post(origins_url, data={"origen": query}, timeout=REQUEST_TIMEOUT)
     except Exception as e:
         raise AlsaConnectionError(str(e)) from e
 
@@ -220,15 +217,23 @@ def get_stations(query: str = "") -> list[dict]:
         raise AlsaBlockedError()
 
     import json
+    import unicodedata
 
     try:
-        stations = json.loads(resp.text)
+        all_stations = json.loads(resp.text)
     except json.JSONDecodeError:
         return []
 
-    # filtrar solo los campos útiles
+    def _norm(text: str) -> str:
+        decomposed = unicodedata.normalize("NFD", text.casefold())
+        return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+    query_norm = _norm(query)
     result = []
-    for st in stations:
+    for st in all_stations:
+        # filtrar por nombre si hay query
+        if query_norm and query_norm not in _norm(st.get("name", "")):
+            continue
         result.append(
             {
                 "id": st.get("id", ""),
@@ -238,24 +243,75 @@ def get_stations(query: str = "") -> list[dict]:
                 "icon": st.get("icon", ""),
             }
         )
+        if len(result) >= 20:  # suficiente para mostrar
+            break
+
     return result
 
 
 def get_station_id(name: str) -> str:
-    """Encuentra el ID de una estación por su nombre.
+    """Encuentra el ID de una estación de Alsa por su nombre.
 
-    Returns:
-        El ID de la primera coincidencia.
-
-    Raises:
-        AlsaStationError: si no se encuentra ninguna estación.
+    Descarga la lista completa (una petición) y filtra localmente.
+    Prefiere la agrupación "(Todas las paradas)" si existe.
     """
-    stations = get_stations(name.lower()[:20])
-    if not stations:
-        from alsa.exceptions import AlsaStationError
+    import json
+    import unicodedata
 
-        raise AlsaStationError(
-            f"No se encontró ninguna estación que encaje con {name!r}. "
-            "Prueba con otro nombre o usa `alsa stations <texto>` para buscar."
-        )
-    return stations[0]["id"]
+    session = curl_requests.Session()
+    session.impersonate = "chrome"
+
+    origins_url = (
+        f"{BASE_URL}/home"
+        f"?p_p_id=com_babel_alsa_espania_journeysearch_web_JourneySearchPortlet_INSTANCE_21651890"
+        f"&p_p_lifecycle=2&p_p_state=normal&p_p_mode=view"
+        f"&p_p_resource_id=GetOriginsResourceCommand"
+        f"&p_p_cacheability=cacheLevelPage"
+    )
+
+    try:
+        resp = session.post(origins_url, data={"origen": ""}, timeout=REQUEST_TIMEOUT)
+    except Exception as e:
+        raise AlsaConnectionError(str(e)) from e
+
+    if resp.status_code in (403, 429):
+        raise AlsaBlockedError()
+
+    try:
+        all_stations = json.loads(resp.text)
+    except json.JSONDecodeError:
+        raise AlsaParseError("la lista de estaciones no se pudo leer") from None
+
+    def _norm(text: str) -> str:
+        decomposed = unicodedata.normalize("NFD", text.casefold())
+        return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+    name_norm = _norm(name)
+
+    # 1: match exacto (ignorando acentos y mayúsculas)
+    for st in all_stations:
+        if _norm(st.get("name", "")) == name_norm:
+            return st["id"]
+
+    # 2: agrupación "(Todas las paradas)" que contenga el nombre
+    for st in all_stations:
+        st_name = _norm(st.get("name", ""))
+        if "todas las paradas" in st_name.lower() and name_norm in st_name:
+            return st["id"]
+
+    # 3: el nombre EMPIEZA por la búsqueda
+    for st in all_stations:
+        if _norm(st.get("name", "")).startswith(name_norm):
+            return st["id"]
+
+    # 4: el nombre CONTIENE la búsqueda
+    for st in all_stations:
+        if name_norm in _norm(st.get("name", "")):
+            return st["id"]
+
+    from alsa.exceptions import AlsaStationError
+
+    raise AlsaStationError(
+        f"No se encontró ninguna estación que encaje con {name!r}. "
+        "Prueba con otro nombre o usa `alsa stations <texto>` para buscar."
+    )
