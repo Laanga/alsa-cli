@@ -9,6 +9,7 @@ dependencies = [
     "typer>=0.15",
     "rich>=13",
     "curl-cffi>=0.7.4",
+    "textual>=8.2.8,<9",
 ]
 
 [project.scripts]
@@ -19,7 +20,10 @@ alsa-mcp = "alsa.mcp:main"
 mcp = ["fastmcp>=3.2"]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=1.5.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -33,3 +37,7 @@ allow-direct-references = true
 
 [tool.ruff.lint]
 ignore = ["B008"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

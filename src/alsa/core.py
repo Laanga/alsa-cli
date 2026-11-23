@@ -281,6 +281,44 @@ def get_stations(query: str = "") -> list[dict]:
     return result
 
 
+def get_all_stations() -> list[dict]:
+    """Descarga la lista completa de estaciones de Alsa, sin filtrar ni recortar."""
+    session = curl_requests.Session()
+    session.impersonate = "chrome"
+
+    origins_url = (
+        f"{BASE_URL}/home"
+        f"?p_p_id=com_babel_alsa_espania_journeysearch_web_JourneySearchPortlet_INSTANCE_21651890"
+        f"&p_p_lifecycle=2&p_p_state=normal&p_p_mode=view"
+        f"&p_p_resource_id=GetOriginsResourceCommand"
+        f"&p_p_cacheability=cacheLevelPage"
+    )
+
+    try:
+        resp = session.post(origins_url, data={"origen": ""}, timeout=REQUEST_TIMEOUT)
+    except Exception as e:
+        raise AlsaConnectionError(str(e)) from e
+
+    if resp.status_code in (403, 429):
+        raise AlsaBlockedError()
+
+    try:
+        all_stations = json.loads(resp.text)
+    except json.JSONDecodeError:
+        raise AlsaParseError("la lista de estaciones no se pudo leer") from None
+
+    return [
+        {
+            "id": str(st.get("id", "")),
+            "name": st.get("name", ""),
+            "province": st.get("provincecountryName", ""),
+            "icon": st.get("icon", ""),
+        }
+        for st in all_stations
+        if st.get("id") and st.get("name")
+    ]
+
+
 def get_station_id(name: str) -> str:
     """Encuentra el ID de una estación de Alsa por su nombre.
 

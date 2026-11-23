@@ -6,6 +6,9 @@ Busca horarios y tarifas de autobuses Alsa desde el terminal. JSON-first, sin cu
 # instalar
 uv tool install git+https://github.com/ahorrandocon20/alsa-cli
 
+# abrir la TUI: formulario, resultados y compra en alsa.es
+alsa
+
 # buscar buses
 alsa bus Madrid Toledo --date 21/12/2026
 
@@ -71,3 +74,14 @@ uv sync
 uv run pytest -q
 uvx ruff check .
 ```
+
+## TUI
+
+`alsa` sin argumentos, en un terminal interactivo, abre la TUI. Si la salida no es un
+terminal (scripts, agentes), muestra la ayuda como siempre: `alsa bus … --format json`
+no cambia.
+
+1. Escribe origen y destino y elige la parada (↑ ↓ y Enter; «todas» agrupa las paradas de la ciudad).
+2. Elige el día (Hoy, Mañana o el calendario), la franja horaria y los viajeros.
+3. En los resultados: `o` ordena por hora, precio o duración; `a` / `s` cambian de día; `t` quita el filtro de hora.
+4. Enter sobre un autobús abre alsa.es con la búsqueda rellenada; la compra y el pago se hacen allí.

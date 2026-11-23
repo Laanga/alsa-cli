@@ -20,6 +20,19 @@ console = Console()
 app = typer.Typer(add_completion=False)
 
 
+@app.callback(invoke_without_command=True)
+def root(ctx: typer.Context) -> None:
+    """Busca buses de Alsa. Sin argumentos, en un terminal, abre la TUI."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print(ctx.get_help())
+        return
+    from alsa.tui.app import run
+
+    run()
+
+
 def _fail(message: str) -> None:
     print(json.dumps({"error": {"message": message}}, ensure_ascii=False), file=sys.stderr)
     raise typer.Exit(code=1)
