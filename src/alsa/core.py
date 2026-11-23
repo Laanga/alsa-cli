@@ -8,13 +8,18 @@ Flujo (descubierto con ingeniería inversa sobre el HAR real de alsa.es):
 3. GET a `GetJourneyListResource` con `journeyDirection=I` → devuelve el JSON
    con journeys, horarios y precios de la búsqueda en sesión.
 
-Los IDs de estación que usa la búsqueda son los "station IDs" internos de Alsa
-(no los "stop IDs" del autocomplete de la home).
+Reintentos (mismo patrón que renfe-cli): hasta 3 intentos por petición,
+1 s y 2 s de pausa, solo para errores 5xx y conexiones caídas. Nunca para
+bloqueos (403/429), timeouts ni páginas HTML de Imperva. Cada reintento
+queda en la lista `retries` de la respuesta.
 """
 
 from __future__ import annotations
 
+import json
 import re
+import time
+import unicodedata
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -34,6 +39,53 @@ BASE_URL = "https://www.alsa.es"
 PORTLET_ID = "com_babel_alsa_espania_purchase_web_PurchasePortlet"
 PORTLET_NS = f"_{PORTLET_ID}"
 REQUEST_TIMEOUT = 60  # segundos
+RETRY_Pauses = (1.0, 2.0)  # segundos antes del segundo y tercer intento
+RETRY_STATUSES = (500, 502, 503, 504)
+
+
+def _request_with_retries(
+    session: curl_requests.Session,
+    method: str,
+    url: str,
+    label: str,
+    retries_log: list[dict],
+    **kwargs,
+) -> curl_requests.Response:
+    """Hace una petición con hasta 3 intentos, igual que renfe-cli.
+
+    Reintenta solo errores 5xx y conexiones caídas; bloqueos (403/429),
+    timeouts y páginas de bot paran inmediatamente.
+    """
+    errors: list[str] = []
+
+    for attempt in range(1, len(RETRY_Pauses) + 2):
+        try:
+            if method == "GET":
+                resp = session.get(url, timeout=REQUEST_TIMEOUT, **kwargs)
+            else:
+                resp = session.post(url, timeout=REQUEST_TIMEOUT, **kwargs)
+
+            if resp.status_code in (403, 429):
+                raise AlsaBlockedError()
+            if resp.status_code in RETRY_STATUSES and attempt <= len(RETRY_Pauses):
+                errors.append(f"server error ({resp.status_code})")
+                if attempt < len(RETRY_Pauses) + 1:
+                    time.sleep(RETRY_Pauses[attempt - 1])
+                continue
+            return resp
+
+        except AlsaBlockedError:
+            raise  # un bloqueo nunca se reintenta
+        except Exception as e:
+            if attempt <= len(RETRY_Pauses):
+                errors.append(f"connection dropped ({type(e).__name__})")
+                if attempt < len(RETRY_Pauses) + 1:
+                    time.sleep(RETRY_Pauses[attempt - 1])
+                continue
+            raise AlsaConnectionError(str(e)) from e
+
+    # si llegamos aquí, agotamos los reintentos
+    raise AlsaConnectionError(f"{label} falló tras {len(RETRY_Pauses) + 1} intentos")
 
 
 def search_bus(
@@ -41,35 +93,24 @@ def search_bus(
     destination_station_id: str,
     travel_date: str,
     adults: int = 1,
-) -> list[Journey]:
+) -> tuple[list[Journey], list[dict], str]:
     """Busca buses entre dos estaciones de Alsa en una fecha.
 
-    Args:
-        origin_station_id: ID de la estación de salida (p. ej. "5555" = Barajas T4).
-        destination_station_id: ID de la estación de llegada.
-        travel_date: fecha en formato "DD/MM/YYYY".
-        adults: número de pasajeros adultos.
-
     Returns:
-        Lista de journeys ordenados por precio (más barato primero).
+        Tupla de (journeys ordenados por precio, lista de reintentos, shop_url).
 
     Raises:
         AlsaBlockedError: Imperva bloqueó la petición.
-        AlsaConnectionError: no se pudo conectar.
+        AlsaConnectionError: no se pudo conectar tras reintentos.
         AlsaParseError: la respuesta no se pudo interpretar.
         AlsaAuthError: el token CSRF no funcionó.
     """
+    retries: list[dict] = []
     session = curl_requests.Session()
     session.impersonate = "chrome"
 
     # --- paso 0: cookies de Imperva + p_auth de cualquier página -------------
-    try:
-        home = session.get(BASE_URL, timeout=REQUEST_TIMEOUT)
-    except Exception as e:
-        raise AlsaConnectionError(str(e)) from e
-
-    if home.status_code in (403, 429):
-        raise AlsaBlockedError()
+    home = _request_with_retries(session, "GET", BASE_URL, "home", retries)
 
     auth_match = re.search(r'p_auth=([A-Za-z0-9_-]+)', home.text)
     if not auth_match:
@@ -93,16 +134,8 @@ def search_bus(
         f"&employee=false"
     )
 
-    try:
-        search_resp = session.get(search_url, timeout=REQUEST_TIMEOUT)
-    except Exception as e:
-        raise AlsaConnectionError(str(e)) from e
+    search_resp = _request_with_retries(session, "GET", search_url, "search", retries)
 
-    if search_resp.status_code in (403, 429):
-        raise AlsaBlockedError()
-
-    # verificar que la búsqueda se registró: la página de checkout debe contener
-    # el ID de la estación de origen en algún params del portlet
     if origin_station_id not in search_resp.text:
         raise AlsaAuthError(f"p_auth={p_auth[:8]}… posible sesión caducada")
 
@@ -116,18 +149,10 @@ def search_bus(
         f"&journeyDirection=I"
     )
 
-    try:
-        list_resp = session.get(list_url, timeout=REQUEST_TIMEOUT)
-    except Exception as e:
-        raise AlsaConnectionError(str(e)) from e
-
-    if list_resp.status_code in (403, 429):
-        raise AlsaBlockedError()
+    list_resp = _request_with_retries(session, "GET", list_url, "journey list", retries)
 
     if not list_resp.text.strip():
-        return []  # sin resultados, no es error
-
-    import json
+        return [], retries, _shop_url(origin_station_id, destination_station_id, travel_date, adults)
 
     try:
         data = json.loads(list_resp.text)
@@ -136,7 +161,22 @@ def search_bus(
 
     journeys = _parse_journeys(data)
     journeys.sort(key=lambda j: j.cheapest_price)
-    return journeys
+
+    shop = _shop_url(origin_station_id, destination_station_id, travel_date, adults)
+    return journeys, retries, shop
+
+
+def _shop_url(origin_id: str, destination_id: str, date: str, adults: int) -> str:
+    """URL que abre la web de Alsa con la ruta precargada para comprar."""
+    return (
+        f"{BASE_URL}/checkout"
+        f"?originStationId={origin_id}"
+        f"&destinationStationId={destination_id}"
+        f"&departureDate={date}"
+        f"&travelType=OUTWARD"
+        f"&passengerType-1={adults}"
+        f"&seats={adults}"
+    )
 
 
 def _parse_journeys(data: dict) -> list[Journey]:
@@ -192,11 +232,7 @@ def _parse_journeys(data: dict) -> list[Journey]:
 
 
 def get_stations(query: str = "") -> list[dict]:
-    """Busca estaciones de Alsa por nombre (filtrado local).
-
-    El endpoint de Alsa devuelve todas las paradas; el filtrado lo hace
-    el JavaScript de su web en el navegador. Aquí lo hacemos en Python.
-    """
+    """Busca estaciones de Alsa por nombre (filtrado local, como su web)."""
     session = curl_requests.Session()
     session.impersonate = "chrome"
 
@@ -216,9 +252,6 @@ def get_stations(query: str = "") -> list[dict]:
     if resp.status_code in (403, 429):
         raise AlsaBlockedError()
 
-    import json
-    import unicodedata
-
     try:
         all_stations = json.loads(resp.text)
     except json.JSONDecodeError:
@@ -231,7 +264,6 @@ def get_stations(query: str = "") -> list[dict]:
     query_norm = _norm(query)
     result = []
     for st in all_stations:
-        # filtrar por nombre si hay query
         if query_norm and query_norm not in _norm(st.get("name", "")):
             continue
         result.append(
@@ -243,7 +275,7 @@ def get_stations(query: str = "") -> list[dict]:
                 "icon": st.get("icon", ""),
             }
         )
-        if len(result) >= 20:  # suficiente para mostrar
+        if len(result) >= 20:
             break
 
     return result
@@ -253,11 +285,8 @@ def get_station_id(name: str) -> str:
     """Encuentra el ID de una estación de Alsa por su nombre.
 
     Descarga la lista completa (una petición) y filtra localmente.
-    Prefiere la agrupación "(Todas las paradas)" si existe.
+    Prioriza match exacto, luego agrupación de ciudad, luego startsWith.
     """
-    import json
-    import unicodedata
-
     session = curl_requests.Session()
     session.impersonate = "chrome"
 

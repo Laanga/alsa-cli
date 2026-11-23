@@ -11,11 +11,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from alsa.core import get_stations, search_bus
+from alsa.core import get_station_id, get_stations, search_bus
 from alsa.exceptions import AlsaError
 from alsa.models import Journey
 
 console = Console()
+
+app = typer.Typer(add_completion=False)
 
 
 def _fail(message: str) -> None:
@@ -35,6 +37,7 @@ def _check_date(value: str) -> str | None:
     return None
 
 
+@app.command()
 def bus(
     origin: str = typer.Argument(metavar="ORIGEN", help="Nombre o ID de la estación de salida"),
     destination: str = typer.Argument(metavar="DESTINO", help="Nombre o ID de la estación de llegada"),
@@ -48,12 +51,10 @@ def bus(
     if output_format not in ("text", "json"):
         _fail(f"formato desconocido {output_format!r}: usa text o json")
 
-    from alsa.core import get_station_id
-
     try:
         origin_id = origin if origin.isdigit() else get_station_id(origin)
         destination_id = destination if destination.isdigit() else get_station_id(destination)
-        journeys = search_bus(origin_id, destination_id, date, adults)
+        journeys, retries, shop_url = search_bus(origin_id, destination_id, date, adults)
     except AlsaError as e:
         _fail(str(e))
 
@@ -65,13 +66,20 @@ def bus(
             "adults": adults,
             "count": len(journeys),
             "buses": [j.to_dict() for j in journeys],
+            "shop": {
+                "url": shop_url,
+                "prefilled": ["origin", "destination", "date"],
+                "next": "Pulsa «Buscar» en la web de Alsa para ver los mismos buses y comprar.",
+            },
+            "retries": retries,
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
 
-    _print_text(origin, destination, date, journeys)
+    _print_text(origin, destination, date, journeys, shop_url, retries)
 
 
+@app.command()
 def stations(
     query: str = typer.Argument(help="Texto para buscar estaciones"),
 ) -> None:
@@ -89,7 +97,14 @@ def stations(
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
-def _print_text(origin: str, destination: str, date: str, journeys: list[Journey]) -> None:
+def _print_text(
+    origin: str,
+    destination: str,
+    date: str,
+    journeys: list[Journey],
+    shop_url: str,
+    retries: list[dict],
+) -> None:
     header = Text("alsa-cli ", "bold cyan")
     header.append(f"· {origin} → {destination} · {date}")
     console.print(header)
@@ -127,11 +142,9 @@ def _print_text(origin: str, destination: str, date: str, journeys: list[Journey
         )
 
     console.print(Text(f"se muestran {len(journeys)} buses", "dim"))
-
-
-app = typer.Typer(add_completion=False)
-app.command()(bus)
-app.command()(stations)
+    console.print(Text(f"comprar: {shop_url}", "dim"))
+    if retries:
+        console.print(Text(f"reintentos: {len(retries)}", "dim"))
 
 
 def main() -> None:

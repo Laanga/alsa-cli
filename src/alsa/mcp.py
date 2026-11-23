@@ -31,13 +31,14 @@ def search_bus(
     Returns:
         Payload JSON con la lista de buses ordenados por precio,
         cada uno con horarios, duración, transbordos, tipo de servicio
-        (Comfort, Supra…) y tarifas desglosadas. El bus más barato es el
-        primero. Un bloqueo de Imperva o una estación desconocida devuelven
-        error de herramienta, no un resultado vacío.
+        (Comfort, Supra…) y tarifas desglosadas. El campo shop.url abre
+        la web de Alsa con la ruta precargada para comprar. Un bloqueo de
+        Imperva o una estación desconocida devuelven error de herramienta,
+        no un resultado vacío.
     """
     origin_id = origin if origin.isdigit() else get_station_id(origin)
     destination_id = destination if destination.isdigit() else get_station_id(destination)
-    journeys = _search_bus_core(origin_id, destination_id, date, adults)
+    journeys, retries, shop_url = _search_bus_core(origin_id, destination_id, date, adults)
 
     return {
         "origin": origin,
@@ -46,6 +47,12 @@ def search_bus(
         "adults": adults,
         "count": len(journeys),
         "buses": [j.to_dict() for j in journeys],
+        "shop": {
+            "url": shop_url,
+            "prefilled": ["origin", "destination", "date"],
+            "next": "Pulsa «Buscar» en la web de Alsa para ver los mismos buses y comprar.",
+        },
+        "retries": retries,
     }
 
 
