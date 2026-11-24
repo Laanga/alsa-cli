@@ -118,7 +118,7 @@ or a response the CLI can't read.
 
 1. Type the origin and destination and pick the stop (↑ ↓ and Enter; "todas" groups every stop in the
    city). `ctrl+x` swaps them.
-2. Pick the day (Hoy, Mañana or the calendar), the time window and the travellers (up to 9).
+2. Pick the day (Hoy, Mañana or the calendar), the time window and the travellers (1 to 20, like alsa.es).
 3. In the results: `o` sorts by time, price or duration; `a` / `s` move to the previous / next day; `t`
    removes the time filter; `p` hides sold-out buses (they're greyed out and can't be bought). `?` (F1 in the form) shows
    the help and `ctrl+q` quits.

@@ -24,7 +24,7 @@ from textual.widgets import (
 )
 from textual.worker import Worker, WorkerState
 
-from alsa.core import search_bus
+from alsa.core import MAX_ADULTS, search_bus
 from alsa.exceptions import AlsaError
 from alsa.models import Journey
 from alsa.tui import fmt
@@ -218,10 +218,10 @@ class SearchScreen(Screen):
         self.query_one("#day-label", Static).update(fmt.long_date(day))
 
     def _set_adults(self, adults: int) -> None:
-        self.adults = max(1, min(9, adults))
+        self.adults = max(1, min(MAX_ADULTS, adults))
         self.query_one("#pax-count", Static).update(fmt.travellers(self.adults))
         self.query_one("#pax-minus", Button).disabled = self.adults == 1
-        self.query_one("#pax-plus", Button).disabled = self.adults == 9
+        self.query_one("#pax-plus", Button).disabled = self.adults == MAX_ADULTS
 
     @on(Button.Pressed)
     def _button(self, event: Button.Pressed) -> None:

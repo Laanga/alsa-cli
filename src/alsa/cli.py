@@ -11,15 +11,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from alsa.core import MADRID_TZ, get_station_id, get_stations, search_bus
+from alsa.core import MADRID_TZ, MAX_ADULTS, get_station_id, get_stations, search_bus
 from alsa.exceptions import AlsaError
 from alsa.models import Journey
 
 console = Console()
 
 app = typer.Typer(add_completion=False)
-
-MAX_ADULTS = 20  # MAX_PASSENGERS_AMOUNT del buscador de alsa.es
 
 
 @app.callback(invoke_without_command=True)

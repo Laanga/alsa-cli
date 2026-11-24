@@ -195,6 +195,18 @@ async def test_flujo_completo_hasta_datos_del_viajero_en_chrome(fake_alsa):
         await _wait_for(pilot, lambda: isinstance(app.screen, ResultsScreen))
 
 
+async def test_viajeros_llegan_hasta_20_como_en_alsa(fake_alsa):
+    app = app_module.AlsaApp()
+    async with app.run_test(size=(110, 40)) as pilot:
+        app.screen._set_adults(17)
+        for _ in range(5):  # esperando a que acabe la animación del botón, que ignora clics
+            await pilot.click("#pax-plus")
+            await pilot.pause(0.3)
+        assert app.screen.adults == 20
+        assert "20 viajeros" in str(app.screen.query_one("#pax-count").render())
+        assert app.screen.query_one("#pax-plus").disabled
+
+
 async def test_ordenar_por_precio_mantiene_el_bus_seleccionado(fake_alsa):
     app = app_module.AlsaApp()
     async with app.run_test(size=(110, 40)) as pilot:

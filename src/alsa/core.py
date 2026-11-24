@@ -45,6 +45,7 @@ PORTLET_NS = f"_{PORTLET_ID}"
 REQUEST_TIMEOUT = 60  # segundos
 RETRY_Pauses = (1.0, 2.0)  # segundos antes del segundo y tercer intento
 RETRY_STATUSES = (500, 502, 503, 504)
+MAX_ADULTS = 20  # MAX_PASSENGERS_AMOUNT del buscador de alsa.es
 IMPERVA_BLOCK_MARK = "Incapsula incident ID"  # texto de la página de bloqueo, no de las páginas normales
 
 
