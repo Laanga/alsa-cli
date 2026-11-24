@@ -47,7 +47,7 @@ alsa-mcp                                             # start the MCP server (std
 | Command | What it does |
 |---|---|
 | `alsa` | Opens the TUI. If stdin or stdout isn't a terminal (scripts, agents), prints the help instead |
-| `alsa bus FROM TO -d DD/MM/YYYY` | Buses on that date, cheapest first. `--adults N` (default 1), `--format text\|json` (default `text`) |
+| `alsa bus FROM TO -d DD/MM/YYYY` | Buses on that date, cheapest first. `--adults N` (1 to 20, default 1), `--format text\|json` (default `text`) |
 | `alsa stations QUERY` | Up to 20 stations whose name contains the query, as JSON |
 | `alsa-mcp` | MCP server with one tool, `search_bus`, that returns the same JSON as `alsa bus --format json` |
 
@@ -108,8 +108,9 @@ left out here:
 - `retries` lists the requests that failed and worked on a later try (see below), with `request`, `tries`
   and `errors`. It's empty when nothing was retried.
 
-Errors go to stderr as `{"error": {"message": "..."}}` with exit code 1: a bad date or format, an unknown
-station, a block, a timeout, a connection failure or a response the CLI can't read.
+Errors go to stderr as `{"error": {"message": "..."}}` with exit code 1: a badly written or past date, a
+number of adults outside 1 to 20, an unknown format or station, a block, a timeout, a connection failure
+or a response the CLI can't read.
 
 ## TUI
 
@@ -155,8 +156,8 @@ command = "alsa-mcp"
 ```
 
 It has one tool, `search_bus(origin, destination, date, adults=1)`, with the date as `DD/MM/YYYY`. It
-returns the same JSON as `alsa bus --format json`. An unknown station, a badly written date, a block or
-a timeout comes back as a tool error, never as an empty list.
+returns the same JSON as `alsa bus --format json`. An unknown station, a badly written or past date, a
+number of adults outside 1 to 20, a block or a timeout comes back as a tool error, never as an empty list.
 
 ## How it works
 
@@ -177,8 +178,9 @@ an error. Station lookups are a single request and aren't retried.
 
 ## Prices
 
-Prices are the ones alsa.es showed at the time of the search. Check the price, luggage and conditions on
-Alsa's website before buying.
+Prices are the ones alsa.es showed at the time of the search, for all the adults, and don't include the
+management fee alsa.es adds when you pay (2,90 € on an 8 € ticket on 24 Nov 2026). Check the final price,
+luggage and conditions on Alsa's website before buying.
 
 ## Development
 
