@@ -1,16 +1,17 @@
 """Tests offline del servidor MCP: misma respuesta que `alsa bus --format json` y errores de herramienta."""
 
 import json
+from datetime import timedelta
 
 import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
-from test_cli import JOURNEY, RETRIES
+from test_cli import DAY, JOURNEY, RETRIES, TODAY
 from typer.testing import CliRunner
 
 from alsa import cli, mcp
 
-ARGS = {"origin": "Madrid", "destination": "Oviedo", "date": "21/12/2026", "adults": 2}
+ARGS = {"origin": "Madrid", "destination": "Oviedo", "date": DAY, "adults": 2}
 
 
 @pytest.fixture
@@ -36,15 +37,24 @@ async def _call(args: dict) -> dict:
 
 async def test_mcp_responde_lo_mismo_que_el_cli(fake_search):
     from_mcp = await _call(ARGS)
-    cli_result = CliRunner().invoke(cli.app, ["bus", "Madrid", "Oviedo", "-d", "21/12/2026", "-a", "2", "--format", "json"])
+    cli_result = CliRunner().invoke(cli.app, ["bus", "Madrid", "Oviedo", "-d", DAY, "-a", "2", "--format", "json"])
 
     assert from_mcp == json.loads(cli_result.stdout)
-    assert fake_search[0] == ("90155", "90186", "21/12/2026", 2)
+    assert fake_search[0] == ("90155", "90186", DAY, 2)
 
 
-async def test_mcp_rechaza_una_fecha_mal_escrita(fake_search):
-    with pytest.raises(ToolError, match="DD/MM/YYYY"):
-        await _call({**ARGS, "date": "2026-12-21"})
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"date": "2026-12-21"}, "DD/MM/YYYY"),
+        ({"date": (TODAY - timedelta(days=1)).strftime("%d/%m/%Y")}, "ya ha pasado"),
+        ({"adults": 0}, "de 1 a 20"),
+        ({"adults": 21}, "de 1 a 20"),
+    ],
+)
+async def test_mcp_rechaza_fecha_o_adultos_invalidos(fake_search, changes, message):
+    with pytest.raises(ToolError, match=message):
+        await _call({**ARGS, **changes})
     assert fake_search == []
 
 

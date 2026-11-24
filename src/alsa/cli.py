@@ -11,13 +11,15 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from alsa.core import get_station_id, get_stations, search_bus
+from alsa.core import MADRID_TZ, get_station_id, get_stations, search_bus
 from alsa.exceptions import AlsaError
 from alsa.models import Journey
 
 console = Console()
 
 app = typer.Typer(add_completion=False)
+
+MAX_ADULTS = 20  # MAX_PASSENGERS_AMOUNT del buscador de alsa.es
 
 
 @app.callback(invoke_without_command=True)
@@ -44,9 +46,18 @@ def _hm(dt: datetime) -> str:
 
 def _check_date(value: str) -> str | None:
     try:
-        datetime.strptime(value, "%d/%m/%Y")
+        day = datetime.strptime(value, "%d/%m/%Y").date()
     except ValueError:
         return f"fecha inválida {value!r}: se espera DD/MM/YYYY"
+    # con una fecha pasada alsa.es devuelve los buses de hoy
+    if day < datetime.now(MADRID_TZ).date():
+        return f"la fecha {value} ya ha pasado: busca desde hoy en adelante"
+    return None
+
+
+def _check_adults(value: int) -> str | None:
+    if not 1 <= value <= MAX_ADULTS:
+        return f"número de adultos inválido ({value}): alsa.es admite de 1 a {MAX_ADULTS} por reserva"
     return None
 
 
@@ -55,11 +66,13 @@ def bus(
     origin: str = typer.Argument(metavar="ORIGEN", help="Nombre o ID de la estación de salida"),
     destination: str = typer.Argument(metavar="DESTINO", help="Nombre o ID de la estación de llegada"),
     date: str = typer.Option(..., "--date", "-d", help="Fecha del viaje, DD/MM/YYYY"),
-    adults: int = typer.Option(1, "--adults", "-a", help="Número de adultos"),
+    adults: int = typer.Option(1, "--adults", "-a", help=f"Número de adultos, de 1 a {MAX_ADULTS}"),
     output_format: str = typer.Option("text", "--format", help="Salida: text o json"),
 ) -> None:
     """Busca buses de Alsa entre dos estaciones en una fecha, con tarifas."""
     if error := _check_date(date):
+        _fail(error)
+    if error := _check_adults(adults):
         _fail(error)
     if output_format not in ("text", "json"):
         _fail(f"formato desconocido {output_format!r}: usa text o json")

@@ -15,7 +15,7 @@ except ImportError:  # instalado sin el extra mcp
         '  uv tool install --force "alsa-cli[mcp] @ git+https://github.com/ahorrandocon20/alsa-cli"'
     )
 
-from alsa.cli import _check_date
+from alsa.cli import _check_adults, _check_date
 from alsa.core import get_station_id
 from alsa.core import search_bus as _search_bus_core
 
@@ -34,18 +34,19 @@ def search_bus(
     Args:
         origin: nombre o ID de la estación de salida (p. ej. "Madrid" o "5555").
         destination: nombre o ID de la estación de llegada (p. ej. "Toledo" o "1690").
-        date: fecha del viaje en formato DD/MM/YYYY.
-        adults: número de pasajeros adultos (default 1).
+        date: fecha del viaje en formato DD/MM/YYYY, de hoy en adelante.
+        adults: número de pasajeros adultos, de 1 a 20 (default 1).
 
     Returns:
         Payload JSON con la lista de buses ordenados por precio,
         cada uno con horarios, duración, transbordos, tipo de servicio
         (Comfort, Supra…) y tarifas desglosadas. El campo shop.url abre
         en alsa.es la lista de buses de esta búsqueda para comprar. Un bloqueo de
-        Imperva, una estación desconocida o una fecha mal escrita devuelven
-        error de herramienta, no un resultado vacío.
+        Imperva, una estación desconocida, una fecha mal escrita o pasada
+        o un número de adultos fuera de rango devuelven error de herramienta,
+        no un resultado vacío.
     """
-    if error := _check_date(date):
+    if error := _check_date(date) or _check_adults(adults):
         raise ValueError(error)
     origin_id = origin if origin.isdigit() else get_station_id(origin)
     destination_id = destination if destination.isdigit() else get_station_id(destination)

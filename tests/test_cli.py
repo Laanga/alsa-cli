@@ -1,13 +1,14 @@
 """Tests offline del comando `alsa bus`: validación, JSON de salida y errores por stderr."""
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 from typer.testing import CliRunner
 
 from alsa import cli
+from alsa.core import MADRID_TZ
 from alsa.exceptions import AlsaBlockedError
 from alsa.models import Fare, Journey
 
@@ -25,6 +26,8 @@ JOURNEY = Journey(
     service_type="Comfort",
     fares=[Fare(42.15, "SUPER FLEX", "BASE", "Puedes anular y cambiar")],
 )
+TODAY = datetime.now(MADRID_TZ).date()
+DAY = (TODAY + timedelta(days=30)).strftime("%d/%m/%Y")
 RETRIES = [{"request": "home", "tries": 2, "errors": ["server error (503)"]}]
 
 
@@ -50,15 +53,15 @@ def _run(*args: str):
 
 
 def test_bus_json_tiene_buses_enlace_y_reintentos(fake_search):
-    result = _run("bus", "Madrid", "Oviedo", "-d", "21/12/2026", "--adults", "2", "--format", "json")
+    result = _run("bus", "Madrid", "Oviedo", "-d", DAY, "--adults", "2", "--format", "json")
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert fake_search["search"] == [("90155", "90186", "21/12/2026", 2)]
+    assert fake_search["search"] == [("90155", "90186", DAY, 2)]
     assert (payload["origin"], payload["destination"], payload["date"], payload["adults"]) == (
         "Madrid",
         "Oviedo",
-        "21/12/2026",
+        DAY,
         2,
     )
     assert payload["count"] == 1
@@ -69,7 +72,7 @@ def test_bus_json_tiene_buses_enlace_y_reintentos(fake_search):
 
 
 def test_bus_con_id_numerico_no_busca_la_estacion(fake_search):
-    result = _run("bus", "5555", "Oviedo", "-d", "21/12/2026", "--format", "json")
+    result = _run("bus", "5555", "Oviedo", "-d", DAY, "--format", "json")
 
     assert result.exit_code == 0
     assert fake_search["station"] == ["Oviedo"]
@@ -77,7 +80,7 @@ def test_bus_con_id_numerico_no_busca_la_estacion(fake_search):
 
 
 def test_bus_texto_por_defecto(fake_search):
-    result = _run("bus", "Madrid", "Oviedo", "-d", "21/12/2026")
+    result = _run("bus", "Madrid", "Oviedo", "-d", DAY)
 
     assert result.exit_code == 0
     assert "00:30 → 06:15" in result.stdout and "comprar: https://alsa.test/shop" in result.stdout
@@ -87,7 +90,10 @@ def test_bus_texto_por_defecto(fake_search):
     ("args", "message"),
     [
         (["-d", "2026-12-21"], "DD/MM/YYYY"),
-        (["-d", "21/12/2026", "--format", "xml"], "text o json"),
+        (["-d", (TODAY - timedelta(days=1)).strftime("%d/%m/%Y")], "ya ha pasado"),
+        (["-d", DAY, "-a", "0"], "de 1 a 20"),
+        (["-d", DAY, "-a", "21"], "de 1 a 20"),
+        (["-d", DAY, "--format", "xml"], "text o json"),
     ],
 )
 def test_bus_argumentos_invalidos_son_error_por_stderr(fake_search, args, message):
@@ -104,8 +110,15 @@ def test_bus_error_de_alsa_sale_por_stderr(fake_search, monkeypatch):
         raise AlsaBlockedError()
 
     monkeypatch.setattr(cli, "search_bus", blocked)
-    result = _run("bus", "Madrid", "Oviedo", "-d", "21/12/2026", "--format", "json")
+    result = _run("bus", "Madrid", "Oviedo", "-d", DAY, "--format", "json")
 
     assert result.exit_code == 1
     assert result.stdout == ""
     assert "Imperva" in json.loads(result.stderr)["error"]["message"]
+
+
+def test_bus_acepta_hoy_y_20_adultos(fake_search):
+    result = _run("bus", "Madrid", "Oviedo", "-d", TODAY.strftime("%d/%m/%Y"), "-a", "20", "--format", "json")
+
+    assert result.exit_code == 0
+    assert fake_search["search"][0][2:] == (TODAY.strftime("%d/%m/%Y"), 20)
