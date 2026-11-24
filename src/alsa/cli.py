@@ -81,8 +81,8 @@ def bus(
             "buses": [j.to_dict() for j in journeys],
             "shop": {
                 "url": shop_url,
-                "prefilled": ["origin", "destination", "date"],
-                "next": "Pulsa «Buscar» en la web de Alsa para ver los mismos buses y comprar.",
+                "prefilled": ["origin", "destination", "date", "adults"],
+                "next": "La URL abre en alsa.es la lista de buses de esta búsqueda; elige bus y tarifa allí para comprar.",
             },
             "retries": retries,
         }
@@ -133,6 +133,8 @@ def _print_text(
         title.append(f" · {service}", "dim")
         if j.transfers:
             title.append(f" · {j.transfers} transbordo" + ("s" if j.transfers > 1 else ""), "dim")
+        if not j.available:
+            title.append(" · agotado", "bold yellow")
 
         border = "green" if i == 1 else "none"
         lines = [

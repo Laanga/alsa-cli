@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import time
-import webbrowser
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import ClassVar
 
-from rich.table import Table
 from rich.text import Text
 from textual import on, work
 from textual.app import ComposeResult
@@ -31,6 +29,13 @@ from alsa.exceptions import AlsaError
 from alsa.models import Journey
 from alsa.tui import fmt
 from alsa.tui.art import title_text
+from alsa.tui.purchase import (
+    BuyOutcome,
+    BuyScreen,
+    CheckoutScreen,
+    GoToChrome,
+    PurchaseScreen,
+)
 from alsa.tui.stations import StationOption
 from alsa.tui.widgets import BusScene, Chip, MonthCalendar, StationField
 
@@ -348,6 +353,7 @@ class ResultsScreen(Screen):
         Binding("a", "shift_day(-1)", "día anterior"),
         Binding("s", "shift_day(1)", "día siguiente"),
         Binding("t", "toggle_filter", "filtro de hora"),
+        Binding("p", "toggle_sold_out", "agotados"),
         Binding("r", "reload", "actualizar", show=False),
         Binding("f1", "app.help", "ayuda"),
     ]
@@ -357,9 +363,9 @@ class ResultsScreen(Screen):
         self.req = req
         self.journeys: list[Journey] = []
         self.shown: list[Journey] = []
-        self.shop_url = ""
         self.sort_index = 0
         self.filter_on = bool(req.depart_after or req.arrive_before)
+        self.hide_sold_out = False
         self.phase = "loading"
         self._started = 0.0
         self._compact: bool | None = None
@@ -412,19 +418,18 @@ class ResultsScreen(Screen):
         self._fetch(self.req)
 
     @work(thread=True, exclusive=True, group="search", exit_on_error=False)
-    def _fetch(self, req: SearchRequest) -> tuple[SearchRequest, list[Journey], str]:
-        journeys, _retries, shop_url = search_bus(req.origin.id, req.destination.id, req.alsa_date, req.adults)
-        return req, journeys, shop_url
+    def _fetch(self, req: SearchRequest) -> tuple[SearchRequest, list[Journey]]:
+        journeys, _retries, _url = search_bus(req.origin.id, req.destination.id, req.alsa_date, req.adults)
+        return req, journeys
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         if event.worker.group != "search":
             return
         if event.state == WorkerState.SUCCESS:
-            req, journeys, shop_url = event.worker.result
+            req, journeys = event.worker.result
             if req != self.req:
                 return
             self.journeys = journeys
-            self.shop_url = shop_url
             self._show_results()
         elif event.state == WorkerState.ERROR:
             error = event.worker.error
@@ -466,7 +471,15 @@ class ResultsScreen(Screen):
                 "a / s para probar el día anterior o el siguiente  ·  esc para cambiar la búsqueda",
             )
             return
-        self.shown = [j for j in self.journeys if not self.filter_on or matches_time(j, self.req)]
+        in_time = [j for j in self.journeys if not self.filter_on or matches_time(j, self.req)]
+        self.shown = [j for j in in_time if j.available or not self.hide_sold_out]
+        if in_time and not self.shown:
+            self._show_message(
+                "Todos los autobuses que encajan están agotados",
+                f"Hay {len(in_time)} autobuses, pero Alsa no tiene plazas en ninguno.",
+                "p para verlos igualmente  ·  a / s para probar otro día  ·  esc para cambiar la búsqueda",
+            )
+            return
         if not self.shown:
             self._show_message(
                 "Ningún autobús encaja con la hora",
@@ -478,8 +491,8 @@ class ResultsScreen(Screen):
         key = SORTS[self.sort_index][1]
         sorters = {
             "departure": lambda j: j.departure,
-            "price": lambda j: (j.cheapest_price, j.departure),
-            "duration": lambda j: (j.duration_minutes, j.departure),
+            "price": lambda j: (not j.available, j.cheapest_price, j.departure),
+            "duration": lambda j: (not j.available, j.duration_minutes, j.departure),
         }
         self.shown.sort(key=sorters[key])
         self._fill_table(keep)
@@ -489,19 +502,20 @@ class ResultsScreen(Screen):
         self.refresh_bindings()
 
     def _render_summary(self) -> None:
-        cheapest = min(j.cheapest_price for j in self.shown)
-        total = len(self.journeys)
+        available = [j for j in self.shown if j.available]
         shown = len(self.shown)
-        count = f"{shown} autobuses" if shown == total else f"{shown} de {total} autobuses ({describe_filter(self.req)})"
-        if shown == 1:
-            count = "1 autobús" if total == 1 else f"1 de {total} autobuses ({describe_filter(self.req)})"
-        summary = Text.assemble(
-            (count, "bold"),
-            "  ·  desde ",
-            (fmt.price(cheapest), "bold #4ade80"),
-            ("  ·  ordenados por ", "dim"),
-            (SORTS[self.sort_index][0], "dim"),
-        )
+        summary = Text(f"{shown} autobús" if shown == 1 else f"{shown} autobuses", style="bold")
+        if self.filter_on:
+            summary.append(f" que {describe_filter(self.req)}", "bold")
+        sold_out = shown - len(available)
+        if sold_out:
+            summary.append(f"  ·  {sold_out} agotado" + ("s" if sold_out > 1 else ""), "#8b95a7")
+        if available:
+            summary.append("  ·  desde ")
+            summary.append(fmt.price(min(j.cheapest_price for j in available)), "bold #4ade80")
+        else:
+            summary.append("  ·  sin plazas: prueba otro día", "bold #fbbf24")
+        summary.append(f"  ·  por {SORTS[self.sort_index][0]}", "dim")
         self.query_one("#summary", Static).update(summary)
 
     def _fill_table(self, keep: Journey | None = None) -> None:
@@ -519,9 +533,13 @@ class ResultsScreen(Screen):
         if not compact:
             table.add_column("Trayecto", key="hops")
         table.add_column(price_label, key="price")
-        cheapest = min(j.cheapest_price for j in self.shown)
-        fastest = min(j.duration_minutes for j in self.shown)
+        available = [j for j in self.shown if j.available] or self.shown
+        cheapest = min(j.cheapest_price for j in available)
+        fastest = min(j.duration_minutes for j in available)
         for i, j in enumerate(self.shown):
+            if not j.available:
+                table.add_row(*self._sold_out_cells(j, compact), key=str(i))
+                continue
             supra = "supra" in j.service_type.lower()
             price_text = Text(fmt.price(j.cheapest_price), style="bold #4ade80" if j.cheapest_price == cheapest else "")
             if j.cheapest_price == cheapest:
@@ -543,6 +561,20 @@ class ResultsScreen(Screen):
         row = self.shown.index(keep) if keep in self.shown else 0
         table.move_cursor(row=row)
         self._render_detail(row)
+
+    def _sold_out_cells(self, j: Journey, compact: bool) -> list[Text]:
+        dim = "#5b6478"
+        cells = [
+            Text(fmt.hm(j.departure), style=dim),
+            Text(fmt.arrival(j.departure, j.arrival), style=dim),
+            Text(fmt.duration(j.duration_minutes), style=dim),
+            Text(j.origin_name, style=dim, overflow="ellipsis", no_wrap=True),
+            Text(j.service_type or "—", style=dim),
+        ]
+        if not compact:
+            cells.append(Text(fmt.transfers(j.transfers), style=dim))
+        cells.append(Text("agotado", style="italic #5b6478"))
+        return cells
 
     def on_resize(self) -> None:
         self.call_after_refresh(self._relayout)
@@ -577,21 +609,25 @@ class ResultsScreen(Screen):
         if j.line_name and j.line_name != j.service_type:
             text.append(f"  ·  línea {j.line_name}", "dim")
         text.append("\n\n")
-        for fare in j.fares:
-            text.append(f"{fare.fare_name.title():<14}", "bold")
-            text.append(f"{fmt.price(fare.price):>10}", "bold #4ade80")
+        if not j.available:
+            text.append("Agotado: ", "bold #fbbf24")
+            text.append("Alsa no tiene plazas en este autobús. Elige otro o prueba otro día con a / s.", "dim")
+        else:
+            text.append("Desde ", "dim")
+            text.append(fmt.price(j.cheapest_price), "bold #4ade80")
             if self.req.adults > 1:
-                text.append(f"  ({fmt.price(fare.price / self.req.adults)} por viajero)", "dim")
-            if fare.fare_conditions:
-                text.append(f"   {fare.fare_conditions}", "dim")
-            text.append("\n")
+                text.append(f"  ({fmt.price(j.cheapest_price / self.req.adults)} por viajero)", "dim")
+            text.append("   Enter para elegir tarifa y pagar", "dim")
         self.query_one("#detail-text", Static).update(text)
+        self.query_one("#buy", Button).disabled = not j.available
 
     # --- acciones -------------------------------------------------------------
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action in ("buy", "sort"):
             return self.phase == "list"
+        if action == "toggle_sold_out":
+            return self.phase != "loading" and any(not j.available for j in self.journeys)
         if action == "toggle_filter":
             return bool(self.req.depart_after or self.req.arrive_before) and self.phase != "loading"
         if action == "reload":
@@ -609,12 +645,21 @@ class ResultsScreen(Screen):
         if self.phase != "list" or not 0 <= table.cursor_row < len(self.shown):
             return
         journey = self.shown[table.cursor_row]
+        if not journey.available:
+            self.notify("Ese autobús está agotado; elige otro.", severity="warning", timeout=2.5)
+            return
 
-        def bought(result: str | None) -> None:
-            if result in ("opened", "failed"):
-                self.app.push_screen(PurchaseScreen(journey, self.shop_url, result == "opened"), self._purchase_closed)
+        def finished(outcome: BuyOutcome | None) -> None:
+            if outcome is not None:
+                self.app.push_screen(PurchaseScreen(journey, self.req, outcome), self._purchase_closed)
 
-        self.app.push_screen(BuyScreen(journey, self.req, self.shop_url), bought)
+        def chosen(choice: GoToChrome | BuyOutcome | None) -> None:
+            if isinstance(choice, GoToChrome):
+                self.app.push_screen(CheckoutScreen(journey, self.req, choice.package), finished)
+            else:
+                finished(choice)
+
+        self.app.push_screen(BuyScreen(journey, self.req), chosen)
 
     def _purchase_closed(self, result: str | None) -> None:
         if result == "new":
@@ -641,6 +686,12 @@ class ResultsScreen(Screen):
             self._show_results(keep=self._current())
         self.notify("Mostrando todas las horas" if not self.filter_on else f"Solo los que {describe_filter(self.req)}", timeout=2)
 
+    def action_toggle_sold_out(self) -> None:
+        self.hide_sold_out = not self.hide_sold_out
+        if self.journeys:
+            self._show_results(keep=self._current())
+        self.notify("Ocultando los agotados" if self.hide_sold_out else "Mostrando también los agotados", timeout=2)
+
     def action_reload(self) -> None:
         self.search()
 
@@ -653,131 +704,6 @@ class ResultsScreen(Screen):
         self.action_back()
 
 
-class BuyScreen(ModalScreen[str | None]):
-    """Confirma el autobús y abre alsa.es con la búsqueda ya hecha."""
-
-    BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "close", "cancelar")]
-
-    def __init__(self, journey: Journey, req: SearchRequest, url: str) -> None:
-        super().__init__()
-        self.journey = journey
-        self.req = req
-        self.url = url
-
-    def compose(self) -> ComposeResult:
-        j = self.journey
-        fare = min(j.fares, key=lambda f: f.price) if j.fares else None
-        summary = Text()
-        summary.append(f"{fmt.hm(j.departure)}  ", "bold")
-        summary.append(j.origin_name)
-        summary.append("  →  ", "bold #40c8ec")
-        summary.append(f"{fmt.arrival(j.departure, j.arrival)}  ", "bold")
-        summary.append(j.destination_name)
-        summary.append(f"\n{fmt.long_date(self.req.day)}  ·  {fmt.duration(j.duration_minutes)}  ·  {j.service_type or 'autobús'}", "dim")
-        if fare is not None:
-            summary.append("\n")
-            summary.append(fmt.price(fare.price), "bold #4ade80")
-            summary.append(f"  {fare.fare_name.title()}  ·  {fmt.travellers(self.req.adults)}", "dim")
-        with Vertical(id="buy-box", classes="dialog"):
-            yield Label("Comprar en alsa.es", classes="dialog-title")
-            yield Static(summary, id="buy-summary")
-            yield Static(
-                "Se abre la web de Alsa con esta búsqueda ya rellenada: origen, destino, día y viajeros. "
-                "Allí eliges este autobús, rellenas los datos de los viajeros y pagas. "
-                "Desde el terminal no se cobra nada.",
-                classes="dialog-text",
-            )
-            with Horizontal(classes="dialog-buttons"):
-                yield Button("Abrir alsa.es", id="open", variant="primary", compact=True)
-                yield Button("Copiar enlace", id="copy", compact=True, classes="link")
-                yield Button("Cancelar", id="cancel", compact=True, classes="link")
-
-    def on_mount(self) -> None:
-        self.query_one("#open", Button).focus()
-
-    @on(Button.Pressed, "#open")
-    def _open(self) -> None:
-        try:
-            opened = webbrowser.open(self.url, new=2)
-        except webbrowser.Error:
-            opened = False
-        if not opened:
-            self.app.copy_to_clipboard(self.url)
-        self.dismiss("opened" if opened else "failed")
-
-    @on(Button.Pressed, "#copy")
-    def _copy(self) -> None:
-        self.app.copy_to_clipboard(self.url)
-        self.notify("Enlace copiado. Pégalo en tu navegador para comprar.", timeout=3)
-
-    @on(Button.Pressed, "#cancel")
-    def action_close(self) -> None:
-        self.dismiss(None)
-
-
-class PurchaseScreen(ModalScreen[str | None]):
-    """Lo que queda por hacer en el navegador."""
-
-    BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("escape", "back", "volver a los resultados"),
-        Binding("enter", "back", show=False),
-    ]
-
-    def __init__(self, journey: Journey, url: str, opened: bool) -> None:
-        super().__init__()
-        self.journey = journey
-        self.url = url
-        self.opened = opened
-
-    def compose(self) -> ComposeResult:
-        j = self.journey
-        fare = min(j.fares, key=lambda f: f.price) if j.fares else None
-        price = f" · {fmt.price(fare.price)}" if fare else ""
-        steps = Text()
-        if self.opened:
-            steps.append("✓ alsa.es abierto en tu navegador", "bold #4ade80")
-        else:
-            steps.append("No se pudo abrir el navegador.\n", "bold #fbbf24")
-            steps.append("Enlace copiado al portapapeles; si no, cópialo de aquí:\n", "dim")
-            steps.append(self.url, "#40c8ec")
-        grid = Table.grid(padding=(0, 2))
-        grid.add_column(width=3)
-        grid.add_column()
-        for n, step in enumerate(
-            [
-                "Acepta o rechaza las cookies y, si no ves los autobuses, pulsa «Buscar».",
-                f"Elige el de las {fmt.hm(j.departure)} desde {j.origin_name} ({j.service_type or 'autobús'}{price}).",
-                "Rellena los datos de los viajeros y paga en alsa.es.",
-            ],
-            start=1,
-        ):
-            grid.add_row(Text(f" {n} ", "bold #0b1220 on #40c8ec"), Text(step))
-        with Vertical(id="purchase-box", classes="dialog"):
-            yield Label("Termina la compra en el navegador", classes="dialog-title")
-            yield Static(steps, classes="dialog-text")
-            yield Static(grid, classes="dialog-text")
-            yield Static(Text("Guarda el billete que te envía Alsa por email.", "dim"), classes="dialog-text")
-            with Horizontal(classes="dialog-buttons"):
-                yield Button("Volver a los resultados", id="back", variant="primary", compact=True)
-                yield Button("Nueva búsqueda", id="new", compact=True, classes="link")
-                yield Button("Salir", id="quit", compact=True, classes="link")
-
-    def on_mount(self) -> None:
-        self.query_one("#back", Button).focus()
-
-    @on(Button.Pressed, "#back")
-    def action_back(self) -> None:
-        self.dismiss(None)
-
-    @on(Button.Pressed, "#new")
-    def _new(self) -> None:
-        self.dismiss("new")
-
-    @on(Button.Pressed, "#quit")
-    def _quit(self) -> None:
-        self.dismiss("quit")
-
-
 HELP = [
     ("Formulario", ""),
     ("Escribe y ↑ ↓", "elige parada de la lista"),
@@ -786,10 +712,11 @@ HELP = [
     ("← →", "cambia entre Hoy, Mañana y Otro día"),
     ("Resultados", ""),
     ("↑ ↓", "recorre los autobuses"),
-    ("Enter", "comprar el autobús en alsa.es"),
+    ("Enter", "elegir tarifa y pagar en alsa.es"),
     ("o", "ordenar por hora, precio o duración"),
     ("a / s", "día anterior / siguiente"),
     ("t", "quitar o poner el filtro de hora"),
+    ("p", "ocultar o mostrar los agotados"),
     ("esc", "volver a la búsqueda"),
     ("General", ""),
     ("f1", "esta ayuda"),
@@ -808,7 +735,7 @@ class HelpScreen(ModalScreen[None]):
                 continue
             text.append(f"  {key:<16}", "bold")
             text.append(f"{desc}\n")
-        text.append("\nPrecios de alsa.es en el momento de la búsqueda; la compra y el pago se hacen en su web.", "dim")
+        text.append("\nAl comprar, Chrome se abre en alsa.es con el autobús y la tarifa elegidos; los datos y el pago se hacen allí.", "dim")
         with Vertical(id="help-box", classes="dialog"):
             yield Label("Ayuda", classes="dialog-title")
             yield Static(text, classes="dialog-text")

@@ -16,11 +16,13 @@ queda en la lista `retries` de la respuesta.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 import time
 import unicodedata
 from datetime import datetime
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from curl_cffi import requests as curl_requests
@@ -31,7 +33,7 @@ from alsa.exceptions import (
     AlsaConnectionError,
     AlsaParseError,
 )
-from alsa.models import Fare, Journey
+from alsa.models import Fare, Journey, Package
 
 MADRID_TZ = ZoneInfo("Europe/Madrid")
 
@@ -152,7 +154,7 @@ def search_bus(
     list_resp = _request_with_retries(session, "GET", list_url, "journey list", retries)
 
     if not list_resp.text.strip():
-        return [], retries, _shop_url(origin_station_id, destination_station_id, travel_date, adults)
+        return [], retries, results_url(origin_station_id, destination_station_id, travel_date, adults)
 
     try:
         data = json.loads(list_resp.text)
@@ -162,20 +164,83 @@ def search_bus(
     journeys = _parse_journeys(data)
     journeys.sort(key=lambda j: j.cheapest_price)
 
-    shop = _shop_url(origin_station_id, destination_station_id, travel_date, adults)
+    shop = results_url(origin_station_id, destination_station_id, travel_date, adults)
     return journeys, retries, shop
 
 
-def _shop_url(origin_id: str, destination_id: str, date: str, adults: int) -> str:
-    """URL que abre la web de Alsa con la ruta precargada para comprar."""
+def get_packages(
+    origin_station_id: str,
+    destination_station_id: str,
+    travel_date: str,
+    adults: int,
+    departure: datetime,
+    origin_stop_id: str,
+) -> list[Package]:
+    """Tarifas que ofrece la web para un bus concreto, identificado por hora de salida y parada.
+
+    Repite la búsqueda en una sesión nueva porque las tarifas cuelgan de la búsqueda en sesión.
+    """
+    retries: list[dict] = []
+    session = curl_requests.Session()
+    session.impersonate = "chrome"
+    _request_with_retries(session, "GET", BASE_URL, "home", retries)
+    url = results_url(origin_station_id, destination_station_id, travel_date, adults)
+    _request_with_retries(session, "GET", url, "search", retries)
+
+    def resource(resource_id: str, extra: str) -> dict:
+        resource_url = (
+            f"{BASE_URL}/checkout?p_p_id={PORTLET_ID}&p_p_lifecycle=2&p_p_state=normal&p_p_mode=view"
+            f"&p_p_resource_id={resource_id}&p_p_cacheability=cacheLevelPage{extra}"
+        )
+        resp = _request_with_retries(session, "GET", resource_url, resource_id, retries)
+        try:
+            return json.loads(resp.text)
+        except json.JSONDecodeError as e:
+            raise AlsaParseError(f"JSON inválido en {resource_id}: {e}") from e
+
+    departure_ms = int(departure.timestamp() * 1000)
+    journeys = resource("GetJourneyListResource", "&journeyDirection=I").get("journeys") or []
+    journey = next(
+        (j for j in journeys if j.get("departureDate") == departure_ms and str(j.get("originId")) == origin_stop_id),
+        None,
+    )
+    if journey is None or not journey.get("fares"):
+        return []
+    base = float(journey["fares"][0].get("price") or 0)
+    data = resource("GetPackageFaresResource", f"&journeyIndex={journey['index']}&journeyDirection=I")
+
+    packages = []
+    for raw in data.get("packageFareList") or []:
+        if not raw.get("enabled", True):
+            continue
+        packages.append(
+            Package(
+                id=str(raw.get("farePackageId", "")),
+                name=raw.get("packageName", ""),
+                price=round(base + float(raw.get("totalPassengerPackagePrice") or 0), 2),
+                recommended=bool(raw.get("recommended")),
+                conditions=[_plain(o.get("description", "")) for o in raw.get("packageObservations") or []],
+            )
+        )
+    return sorted(packages, key=lambda p: p.price)
+
+
+def _plain(html_text: str) -> str:
+    return html.unescape(re.sub(r"<[^>]+>", "", html_text)).strip()
+
+
+def results_url(origin_id: str, destination_id: str, date: str, adults: int) -> str:
+    """URL que abre en alsa.es la lista de buses de esta búsqueda, sin sesión previa.
+
+    Es la misma acción `SearchJourneysAction` que lanza el botón «Buscar» de la web; sin
+    `p_auth` también funciona en un navegador recién abierto.
+    """
     return (
-        f"{BASE_URL}/checkout"
-        f"?originStationId={origin_id}"
-        f"&destinationStationId={destination_id}"
-        f"&departureDate={date}"
-        f"&travelType=OUTWARD"
-        f"&passengerType-1={adults}"
-        f"&seats={adults}"
+        f"{BASE_URL}/checkout?p_p_id={PORTLET_ID}&p_p_lifecycle=1&p_p_state=normal&p_p_mode=view"
+        f"&{PORTLET_NS}_javax.portlet.action=SearchJourneysAction"
+        f"&alsaspam=&originStationId={origin_id}&destinationStationId={destination_id}"
+        f"&departureDate={quote(date, safe='')}&returnDate=&seats={adults}&promoCode=&youngPromoCode="
+        f"&travelType=OUTWARD&employee=false&passengerType-1={adults}"
     )
 
 
@@ -223,6 +288,7 @@ def _parse_journeys(data: dict) -> list[Journey]:
                     service_type=service_types[0],
                     fares=fares,
                     line_name=rj.get("lineName", ""),
+                    available=rj.get("canBeSold") != "F",
                 )
             )
         except (KeyError, ValueError, TypeError):

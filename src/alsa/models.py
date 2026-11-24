@@ -43,6 +43,7 @@ class Journey:
     service_type: str  # "Comfort", "Supra", etc.
     fares: list[Fare]
     line_name: str = ""
+    available: bool = True  # False si Alsa marca el bus como «No hay plazas disponibles»
 
     @property
     def cheapest_price(self) -> float:
@@ -60,6 +61,7 @@ class Journey:
             "transfers": self.transfers,
             "service_type": self.service_type,
             "line_name": self.line_name,
+            "available": self.available,
             "cheapest_price_eur": round(self.cheapest_price, 2),
             "fares": [
                 {
@@ -87,4 +89,16 @@ class Journey:
             service_type=d["service_type"],
             fares=[Fare(**f) for f in d.get("fares", [])],
             line_name=d.get("line_name", ""),
+            available=d.get("available", True),
         )
+
+
+@dataclass(frozen=True)
+class Package:
+    """Tarifa de la web de Alsa para un bus (Básica, Flexible…), con el precio total ya sumado."""
+
+    id: str
+    name: str
+    price: float  # total para todos los viajeros, sin gastos de gestión
+    recommended: bool
+    conditions: list[str]

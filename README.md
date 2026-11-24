@@ -54,6 +54,7 @@ alsa-mcp
       "transfers": 1,
       "service_type": "Comfort",
       "cheapest_price_eur": 26.5,
+      "available": true,
       "fares": [
         {"price": 26.5, "fare_name": "Tarifa Flex", "fare_type": "FLX"}
       ]
@@ -83,5 +84,9 @@ no cambia.
 
 1. Escribe origen y destino y elige la parada (↑ ↓ y Enter; «todas» agrupa las paradas de la ciudad).
 2. Elige el día (Hoy, Mañana o el calendario), la franja horaria y los viajeros.
-3. En los resultados: `o` ordena por hora, precio o duración; `a` / `s` cambian de día; `t` quita el filtro de hora.
-4. Enter sobre un autobús abre alsa.es con la búsqueda rellenada; la compra y el pago se hacen allí.
+3. En los resultados: `o` ordena por hora, precio o duración; `a` / `s` cambian de día; `t` quita el filtro de hora;
+   `p` oculta los agotados (salen en gris y no se pueden comprar).
+4. Enter sobre un autobús enseña las tarifas reales de alsa.es (Básica, Flexible, Superflexible) con su precio.
+5. Al elegir tarifa, la TUI abre Chrome con un perfil propio (`~/.cache/alsa-cli/chrome`), hace la búsqueda,
+   elige ese autobús y esa tarifa y deja la página en «Datos del viajero»: solo queda rellenar y pagar.
+   Si no hay Chrome, Chromium, Brave ni Edge, abre en tu navegador la lista de resultados de alsa.es.

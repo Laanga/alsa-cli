@@ -359,6 +359,7 @@ ModalScreen {
 }
 
 .dialog {
+    overflow-y: auto;
     width: auto;
     max-width: 90%;
     height: auto;
@@ -422,4 +423,61 @@ ModalScreen {
 
 Footer {
     background: $surface;
+}
+
+/* --- compra --------------------------------------------------------------- */
+
+#buy-box {
+    width: 80;
+}
+
+.dialog-subtitle {
+    color: $text-muted;
+    margin-bottom: 0;
+}
+
+#packages {
+    height: auto;
+    max-height: 12;
+    margin-bottom: 1;
+    background: $panel;
+    border: none;
+    padding: 0;
+}
+
+#packages > .option-list--option {
+    padding: 0 1;
+}
+
+#packages > .option-list--option-highlighted {
+    background: $primary;
+}
+
+#packages:focus > .option-list--option-highlighted {
+    background: $primary;
+    text-style: none;
+}
+
+#checkout-box {
+    width: 64;
+}
+
+#checkout-scene {
+    margin-bottom: 1;
+}
+
+CheckoutScreen.-short #checkout-scene {
+    display: none;
+}
+
+BuyScreen.-short #buy-note {
+    display: none;
+}
+
+BuyScreen.-short .dialog {
+    padding: 0 2;
+}
+
+BuyScreen.-short #buy-summary {
+    padding: 0 1;
 }

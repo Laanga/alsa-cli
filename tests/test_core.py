@@ -124,3 +124,14 @@ def test_journey_to_dict_y_from_dict_roundtrip():
     assert j2.origin_id == j.origin_id
     assert j2.cheapest_price == j.cheapest_price
     assert j2.duration_minutes == j.duration_minutes
+
+
+def test_parse_marca_agotados_con_canbesold_f():
+    import copy
+
+    data = copy.deepcopy(SAMPLE)
+    data["journeys"][0]["canBeSold"] = "F"
+    data["journeys"][1]["canBeSold"] = "V"
+    journeys = _parse_journeys(data)
+    assert [j.available for j in journeys] == [False, True]
+    assert journeys[0].to_dict()["available"] is False

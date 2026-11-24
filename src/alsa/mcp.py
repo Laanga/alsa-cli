@@ -32,7 +32,7 @@ def search_bus(
         Payload JSON con la lista de buses ordenados por precio,
         cada uno con horarios, duración, transbordos, tipo de servicio
         (Comfort, Supra…) y tarifas desglosadas. El campo shop.url abre
-        la web de Alsa con la ruta precargada para comprar. Un bloqueo de
+        en alsa.es la lista de buses de esta búsqueda para comprar. Un bloqueo de
         Imperva o una estación desconocida devuelven error de herramienta,
         no un resultado vacío.
     """
@@ -49,8 +49,8 @@ def search_bus(
         "buses": [j.to_dict() for j in journeys],
         "shop": {
             "url": shop_url,
-            "prefilled": ["origin", "destination", "date"],
-            "next": "Pulsa «Buscar» en la web de Alsa para ver los mismos buses y comprar.",
+            "prefilled": ["origin", "destination", "date", "adults"],
+            "next": "La URL abre en alsa.es la lista de buses de esta búsqueda; elige bus y tarifa allí para comprar.",
         },
         "retries": retries,
     }
