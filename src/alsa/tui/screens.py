@@ -97,7 +97,7 @@ def describe_filter(req: SearchRequest) -> str:
 class SearchScreen(Screen):
     """Formulario: desde, hasta, día, hora y viajeros."""
 
-    VERTICAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] = [(0, "-tiny"), (22, "-compact"), (24, "-roomy"), (31, "-short"), (37, "-tall")]
+    VERTICAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] = [(0, "-tiny"), (22, "-compact"), (24, "-roomy"), (30, "-short"), (35, "-tall")]
     HORIZONTAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] = [(0, "-narrow"), (78, "-wide")]
 
     BINDINGS: ClassVar[list[BindingType]] = [
@@ -153,7 +153,7 @@ class SearchScreen(Screen):
                 yield Button("Ayuda", id="help", compact=True, classes="link")
                 yield Button("Créditos", id="credits", compact=True, classes="link")
             yield Static("", id="stations-status")
-        yield Footer()
+        yield Footer(compact=True)
 
     def on_mount(self) -> None:
         self.query_one("#origin", StationField).input.focus()
@@ -391,7 +391,7 @@ class ResultsScreen(Screen):
                     with Vertical(id="detail-actions"):
                         yield Button("Comprar en alsa.es", id="buy", variant="primary", compact=True)
                         yield Button("Nueva búsqueda", id="new", compact=True, classes="link")
-        yield Footer()
+        yield Footer(compact=True)
 
     def on_mount(self) -> None:
         self.call_after_refresh(self._render_route)
@@ -530,7 +530,7 @@ class ResultsScreen(Screen):
         price_label = "Precio" if self.req.adults == 1 else f"Precio ({self.req.adults})"
         table.add_column("Sale", key="dep")
         table.add_column("Llega", key="arr")
-        table.add_column("Dura" if compact else "Duración", key="dur")
+        table.add_column("Duración", key="dur")
         table.add_column("Sale de", key="from", width=16 if compact else None)
         table.add_column("Servicio", key="svc")
         if not compact:
@@ -707,27 +707,39 @@ class ResultsScreen(Screen):
         self.action_back()
 
 
-HELP = [
-    ("Formulario", ""),
-    ("Escribe y ↑ ↓", "elige parada de la lista"),
-    ("Enter / Tab", "acepta la parada y pasa al siguiente campo"),
-    ("ctrl+x", "intercambia origen y destino"),
-    ("← →", "cambia entre Hoy, Mañana y Otro día"),
-    ("Resultados", ""),
-    ("↑ ↓", "recorre los autobuses"),
-    ("Enter", "elegir tarifa y pagar en alsa.es"),
-    ("o", "ordenar por hora, precio o duración"),
-    ("a / s", "día anterior / siguiente"),
-    ("t", "quitar o poner el filtro de hora"),
-    ("p", "ocultar o mostrar los agotados"),
-    ("esc", "volver a la búsqueda"),
-    ("General", ""),
-    ("? / fn+F1", "esta ayuda (? solo en resultados)"),
-    ("ctrl+q", "salir"),
-]
+# ctrl+q y la tecla de ayuda ya van siempre en la barra de abajo.
+HELP = {
+    "Formulario": [
+        ("Escribe y ↑ ↓", "elige parada de la lista"),
+        ("Enter / Tab", "acepta la parada y sigue"),
+        ("ctrl+x", "intercambia origen y destino"),
+        ("← →", "Hoy, Mañana u Otro día"),
+    ],
+    "Resultados": [
+        ("↑ ↓", "recorre los autobuses"),
+        ("Enter", "elige tarifa y paga"),
+        ("o", "ordena: hora, precio, duración"),
+        ("a / s", "día anterior / siguiente"),
+        ("t", "quita o pone el filtro de hora"),
+        ("p", "oculta o muestra los agotados"),
+        ("esc", "vuelve a la búsqueda"),
+    ],
+}
+
+
+def _help_section(title: str) -> Text:
+    text = Text()
+    text.append(f"{title}\n", "bold #40c8ec")
+    for key, desc in HELP[title]:
+        text.append(f"  {key:<14}", "bold")
+        text.append(f"{desc}\n")
+    text.rstrip()
+    return text
 
 
 class HelpScreen(ModalScreen[None]):
+    HORIZONTAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] = [(0, "-narrow"), (110, "-wide")]
+    VERTICAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] = [(0, "-short"), (28, "-tall")]
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "close", "cerrar"),
         Binding("f1", "close", show=False),
@@ -735,17 +747,16 @@ class HelpScreen(ModalScreen[None]):
     ]
 
     def compose(self) -> ComposeResult:
-        text = Text()
-        for key, desc in HELP:
-            if not desc:
-                text.append(f"{key}\n" if not text else f"\n{key}\n", "bold #40c8ec")
-                continue
-            text.append(f"  {key:<16}", "bold")
-            text.append(f"{desc}\n")
-        text.append("\nAl comprar, Chrome se abre en alsa.es con el autobús y la tarifa elegidos; los datos y el pago se hacen allí.", "dim")
         with Vertical(id="help-box", classes="dialog"):
             yield Label("Ayuda", classes="dialog-title")
-            yield Static(text, classes="dialog-text")
+            with Horizontal(id="help-cols"):
+                yield Static(_help_section("Formulario"), classes="help-col")
+                yield Static(_help_section("Resultados"), classes="help-col")
+            yield Static(
+                Text("Al comprar, Chrome se abre en alsa.es con el autobús y la tarifa elegidos; los datos y el pago se hacen allí.", "dim"),
+                id="help-note",
+                classes="dialog-text",
+            )
             with Horizontal(classes="dialog-buttons"):
                 yield Button("Cerrar", id="close", variant="primary", compact=True)
 

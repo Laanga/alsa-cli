@@ -163,7 +163,7 @@ def _open_in_browser(url: str, app: App) -> bool:
 class CheckoutScreen(ModalScreen[BuyOutcome]):
     """Progreso mientras Chrome hace la búsqueda, elige el bus y llega a «Datos»."""
 
-    VERTICAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] = [(0, "-short"), (34, "-tall")]
+    VERTICAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] = [(0, "-short"), (28, "-tall")]
 
     def __init__(self, journey: Journey, req: SearchRequest, package: Package | None) -> None:
         super().__init__()

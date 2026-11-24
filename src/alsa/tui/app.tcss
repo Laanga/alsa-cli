@@ -6,6 +6,7 @@ Screen {
 
 #search-scroll {
     scrollbar-size-vertical: 1;
+    align-vertical: middle;
 }
 
 #title {
@@ -24,42 +25,46 @@ Screen {
     border-bottom: double $panel-lighten-2;
 }
 
-#search-scroll {
-    align-vertical: middle;
-}
-
+/* Alto de la terminal: tiny <22, compact 22-23, roomy 24-29, short 30-34 (120x30 de macOS), tall 35+. */
 SearchScreen.-tiny #scene,
 SearchScreen.-tiny #title,
-SearchScreen.-tiny #tagline,
 SearchScreen.-compact #tagline,
 SearchScreen.-compact #links,
 SearchScreen.-roomy #tagline,
 SearchScreen.-roomy #links,
-SearchScreen.-narrow #day-label,
 SearchScreen.-short #tagline,
-SearchScreen.-short #links {
+SearchScreen.-short #links,
+SearchScreen.-tiny #tagline,
+SearchScreen.-narrow #day-label {
     display: none;
 }
 
-/* Terminal por defecto (80x24) o algo menor: autocar más bajo y formulario sin huecos. */
-SearchScreen.-compact #title,
-SearchScreen.-roomy #title {
+SearchScreen.-compact #title {
     margin: 0;
 }
 
 SearchScreen.-compact #scene,
-SearchScreen.-roomy #scene {
+SearchScreen.-roomy #scene,
+SearchScreen.-short #scene {
     height: 10;
     margin: 0;
     border-bottom: none;
 }
 
-SearchScreen.-short #scene {
-    height: 11;
-    margin: 0;
+SearchScreen.-compact #form {
+    padding: 0 1;
 }
 
-SearchScreen.-compact #form {
+SearchScreen.-compact .row,
+SearchScreen.-roomy .row {
+    margin-bottom: 0;
+}
+
+#stations-status.-empty {
+    display: none;
+}
+
+#form {
     padding: 0 1;
 }
 
@@ -82,6 +87,10 @@ SearchScreen.-roomy .row {
 .row {
     height: auto;
     margin-bottom: 1;
+}
+
+#form #submit-row {
+    margin-bottom: 0;
 }
 
 .field-label {
@@ -419,7 +428,42 @@ ModalScreen {
 }
 
 #help-box {
-    width: 76;
+    width: 104;
+}
+
+#help-cols {
+    height: auto;
+    margin-bottom: 1;
+}
+
+.help-col {
+    width: 1fr;
+    height: auto;
+}
+
+HelpScreen.-narrow #help-box {
+    width: 56;
+}
+
+HelpScreen.-narrow #help-cols {
+    layout: vertical;
+}
+
+HelpScreen.-narrow .help-col {
+    width: 100%;
+    margin-bottom: 1;
+}
+
+HelpScreen.-narrow .help-col:last-child {
+    margin-bottom: 0;
+}
+
+HelpScreen.-short #help-note {
+    display: none;
+}
+
+HelpScreen.-short .dialog {
+    padding: 0 3;
 }
 
 .dialog-title {
@@ -509,6 +553,10 @@ Footer {
 
 #checkout-scene {
     margin-bottom: 1;
+}
+
+#checkout-box > .dialog-text:last-child {
+    margin-bottom: 0;
 }
 
 CheckoutScreen.-short #checkout-scene {
