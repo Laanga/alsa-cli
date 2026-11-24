@@ -1,92 +1,166 @@
 # alsa-cli
 
-Busca horarios y tarifas de autobuses Alsa desde el terminal. JSON-first, sin cuenta, sin API key.
+Search Alsa bus timetables and fares from the terminal: an interactive TUI that takes you to Alsa's
+checkout, a CLI with JSON output for scripts and AI agents, and an MCP server. No account, no API key.
 
-```bash
-# instalar
+> **Unofficial.** Not affiliated with, endorsed by or supported by Alsa. The CLI talks directly to
+> alsa.es's web API, anonymously, the same way the website does before anyone signs in. That API is
+> undocumented and can change without notice. Alsa is a trademark of its owner.
+
+## Features
+
+- **Interactive TUI** (`alsa`): pick stops, day, time and travellers, browse the buses, see the real fares
+  (Básica, Flexible, Superflexible) and open Alsa's checkout at the passenger details page.
+- **Buses for a route and date** (`alsa bus`): times, duration, transfers, service type (Comfort, Supra…),
+  availability and price, cheapest first, as text or JSON.
+- **Station search** (`alsa stations`), with accents and case ignored.
+- **MCP server** (`alsa-mcp`) so assistants can search buses with the same JSON.
+
+The TUI and the CLI messages are in Spanish.
+
+## Install
+
+You need Python 3.12 or later and [uv](https://docs.astral.sh/uv/).
+
+```sh
 uv tool install git+https://github.com/ahorrandocon20/alsa-cli
 
-# abrir la TUI: formulario, resultados y compra en alsa.es
-alsa
-
-# buscar buses
-alsa bus Madrid Toledo --date 21/12/2026
-
-# con formato JSON (para scripts y agentes)
-alsa bus Madrid Toledo -d 21/12/2026 --format json
-
-# buscar estaciones
-alsa stations "mad"
-
-# servidor MCP para asistentes
-pipx install "alsa-cli[mcp]"
-alsa-mcp
+# with the MCP server
+uv tool install "alsa-cli[mcp] @ git+https://github.com/ahorrandocon20/alsa-cli"
 ```
 
-> **Unofficial.** No afiliado, respaldado ni soportado por Alsa. El CLI habla
-> directamente con la API web de alsa.es, de forma anónima, igual que lo hace
-> el navegador antes de que nadie inicie sesión. Esa API no está documentada
-> y puede cambiar sin previo aviso. Alsa es una marca de sus respectivos
-> propietarios.
+It isn't on PyPI, so `pip install alsa-cli` won't install it.
 
-## Cómo funciona
+## Quick start
 
-1. Obtiene cookies de Imperva (bot protection) y el token CSRF `p_auth` del HTML de alsa.es, con `curl_cffi` impersonando Chrome.
-2. Envía la búsqueda al `SearchJourneysAction` del portlet Liferay (un GET con `originStationId`, `destinationStationId`, `departureDate` y pasajeros).
-3. Recupera los resultados del `GetJourneyListResource` — un JSON con cada bus: horarios, duración, transbordos, tipo de servicio (Comfort/Supra) y todas las tarifas con precio.
+```sh
+alsa                                                 # open the TUI
+alsa bus Madrid Oviedo --date 21/12/2026             # buses as text
+alsa bus Madrid Oviedo -d 21/12/2026 --format json   # the same as JSON
+alsa bus Madrid Oviedo -d 21/12/2026 --adults 2      # price for two adults
+alsa stations oviedo                                 # find a station and its ID
+alsa-mcp                                             # start the MCP server (stdio)
+```
 
-## Qué devuelve
+## Commands
+
+| Command | What it does |
+|---|---|
+| `alsa` | Opens the TUI. If stdin or stdout isn't a terminal (scripts, agents), prints the help instead |
+| `alsa bus FROM TO -d DD/MM/YYYY` | Buses on that date, cheapest first. `--adults N` (default 1), `--format text\|json` (default `text`) |
+| `alsa stations QUERY` | Up to 20 stations whose name contains the query, as JSON |
+| `alsa-mcp` | MCP server with one tool, `search_bus`, that returns the same JSON as `alsa bus --format json` |
+
+`FROM` and `TO` take a name or a numeric ID. A name resolves, in this order, to an exact match, a city
+group ("Madrid (Todas las paradas)"), a station starting with it, or one containing it. A numeric ID is
+used as is: a station ID from `alsa stations` or a stop ID from a search result (`origin_id`).
+
+## Output
+
+`alsa bus --format json` prints one JSON document. This one ran on 24 Nov 2026; 35 of its 36 buses are
+left out here:
 
 ```json
 {
   "origin": "Madrid",
-  "destination": "Toledo",
+  "destination": "Oviedo",
   "date": "21/12/2026",
-  "count": 2,
+  "adults": 1,
+  "count": 36,
   "buses": [
     {
-      "origin_id": "5555",
-      "origin_name": "Aeropuerto Madrid - Barajas T4",
-      "destination_name": "Toledo",
-      "departure": "2026-12-21T01:15:00+01:00",
-      "arrival": "2026-12-21T06:33:00+01:00",
-      "duration_minutes": 318,
-      "transfers": 1,
+      "origin_id": "155",
+      "origin_name": "Madrid Estación Sur",
+      "destination_id": "186",
+      "destination_name": "Oviedo / Uviéu",
+      "departure": "2026-12-21T00:30:00+01:00",
+      "arrival": "2026-12-21T06:15:00+01:00",
+      "duration_minutes": 345,
+      "transfers": 0,
       "service_type": "Comfort",
-      "cheapest_price_eur": 26.5,
+      "line_name": "",
       "available": true,
+      "cheapest_price_eur": 42.15,
       "fares": [
-        {"price": 26.5, "fare_name": "Tarifa Flex", "fare_type": "FLX"}
+        {
+          "price": 42.15,
+          "fare_name": "SUPER FLEX",
+          "fare_type": "BASE",
+          "fare_conditions": "Puedes anular y cambiar"
+        }
       ]
     }
-  ]
+  ],
+  "shop": {
+    "url": "https://www.alsa.es/checkout?p_p_id=com_babel_alsa_espania_purchase_web_PurchasePortlet&p_p_lifecycle=1&p_p_state=normal&p_p_mode=view&_com_babel_alsa_espania_purchase_web_PurchasePortlet_javax.portlet.action=SearchJourneysAction&alsaspam=&originStationId=90155&destinationStationId=90186&departureDate=21%2F12%2F2026&returnDate=&seats=1&promoCode=&youngPromoCode=&travelType=OUTWARD&employee=false&passengerType-1=1",
+    "prefilled": ["origin", "destination", "date", "adults"],
+    "next": "La URL abre en alsa.es la lista de buses de esta búsqueda; elige bus y tarifa allí para comprar."
+  },
+  "retries": []
 }
 ```
 
-## Aviso
+- `fares` is what Alsa's results list shows for each bus: usually a single price, the cheapest one. The
+  full set of fares for a bus (Básica, Flexible, Superflexible) is shown in the TUI.
+- `available` is `false` when Alsa has no seats left on that bus.
+- `shop.url` opens alsa.es with the same search, to pick the bus and fare and pay there.
+- `retries` lists the requests that failed and worked on a later try (see below), with `request`, `tries`
+  and `errors`. It's empty when nothing was retried.
 
-Los precios son los que alsa.es publicaba en el momento de la búsqueda.
-Confirma el precio, equipaje y condiciones en la web de Alsa antes de comprar.
-
-## Desarrollo
-
-```bash
-uv sync
-uv run pytest -q
-uvx ruff check .
-```
+Errors go to stderr as `{"error": {"message": "..."}}` with exit code 1: a bad date or format, an unknown
+station, a block, a timeout, a connection failure or a response the CLI can't read.
 
 ## TUI
 
-`alsa` sin argumentos, en un terminal interactivo, abre la TUI. Si la salida no es un
-terminal (scripts, agentes), muestra la ayuda como siempre: `alsa bus … --format json`
-no cambia.
+`alsa` with no arguments, in a terminal, opens the TUI.
 
-1. Escribe origen y destino y elige la parada (↑ ↓ y Enter; «todas» agrupa las paradas de la ciudad).
-2. Elige el día (Hoy, Mañana o el calendario), la franja horaria y los viajeros.
-3. En los resultados: `o` ordena por hora, precio o duración; `a` / `s` cambian de día; `t` quita el filtro de hora;
-   `p` oculta los agotados (salen en gris y no se pueden comprar).
-4. Enter sobre un autobús enseña las tarifas reales de alsa.es (Básica, Flexible, Superflexible) con su precio.
-5. Al elegir tarifa, la TUI abre Chrome con un perfil propio (`~/.cache/alsa-cli/chrome`), hace la búsqueda,
-   elige ese autobús y esa tarifa y deja la página en «Datos del viajero»: solo queda rellenar y pagar.
-   Si no hay Chrome, Chromium, Brave ni Edge, abre en tu navegador la lista de resultados de alsa.es.
+1. Type the origin and destination and pick the stop (↑ ↓ and Enter; "todas" groups every stop in the
+   city). `ctrl+x` swaps them.
+2. Pick the day (Hoy, Mañana or the calendar), the time window and the travellers (up to 9).
+3. In the results: `o` sorts by time, price or duration; `a` / `s` move to the previous / next day; `t`
+   removes the time filter; `p` hides sold-out buses (they're greyed out and can't be bought). `?` (F1 in the form) shows
+   the help and `ctrl+q` quits.
+4. Enter on a bus shows its real fares on alsa.es (Básica, Flexible, Superflexible) with their price.
+5. When you pick a fare, the TUI opens Chrome with its own profile (`~/.cache/alsa-cli/chrome`), runs the
+   search, picks that bus and that fare and leaves the page at the passenger details step: you fill them
+   in and pay. If there's no Chrome, Chromium, Brave or Edge, or any step fails, it opens alsa.es's
+   results list in your default browser instead.
+
+## How it works
+
+1. Gets Imperva's cookies (Alsa's bot protection) and the CSRF token `p_auth` from alsa.es's home page,
+   using `curl_cffi` to look like Chrome.
+2. Sends the search to the Liferay portlet's `SearchJourneysAction`, a GET with `originStationId`,
+   `destinationStationId`, `departureDate` and passengers, which stores it in the server session.
+3. Reads the results from `GetJourneyListResource`: one JSON with every bus, its times, duration,
+   transfers, service type and price.
+
+The TUI's fares come from `GetPackageFaresResource` for the chosen bus.
+
+### Retries and timeouts
+
+Each request is tried up to 3 times, 1 s and then 2 s apart, but only after a 500, 502, 503 or 504 or a
+dropped connection. A 403 or 429, Imperva's block page or a timeout (60 s per request) stops at once with
+an error. Station lookups are a single request and aren't retried.
+
+## Prices
+
+Prices are the ones alsa.es showed at the time of the search. Check the price, luggage and conditions on
+Alsa's website before buying.
+
+## Development
+
+```sh
+uv sync
+uv run alsa --help      # your working copy
+uv run pytest -q        # offline: no requests to alsa.es
+uvx ruff check .
+```
+
+- Keep tests offline, with fake or trimmed responses.
+- Scripts and agents read the JSON, so add fields rather than renaming or removing them.
+- Never commit real passenger or booking data, HAR captures, tickets or tokens.
+
+## License
+
+[MIT](LICENSE).

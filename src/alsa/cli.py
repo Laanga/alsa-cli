@@ -1,4 +1,4 @@
-"""CLI de alsa-cli: busca buses de Alsa, JSON-first, sin cuenta."""
+"""CLI de alsa-cli: busca buses de Alsa, sin cuenta."""
 
 from __future__ import annotations
 
@@ -96,7 +96,7 @@ def bus(
 def stations(
     query: str = typer.Argument(help="Texto para buscar estaciones"),
 ) -> None:
-    """Busca estaciones de Alsa por nombre."""
+    """Busca estaciones de Alsa por nombre (como mucho 20)."""
     try:
         results = get_stations(query)
     except AlsaError as e:

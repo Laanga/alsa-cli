@@ -1,7 +1,7 @@
 [project]
 name = "alsa-cli"
 version = "0.1.0"
-description = "JSON-first CLI for Alsa bus timetables and fares. No account needed."
+description = "Alsa bus timetables and fares from the terminal: a TUI, a CLI with JSON output and an MCP server. No account needed."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
