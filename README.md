@@ -127,6 +127,37 @@ station, a block, a timeout, a connection failure or a response the CLI can't re
    in and pay. If there's no Chrome, Chromium, Brave or Edge, or any step fails, it opens alsa.es's
    results list in your default browser instead.
 
+## MCP server
+
+Install with the `mcp` extra (see [Install](#install)). Without it, `alsa-mcp` stops and prints the command
+to reinstall. Then add it to your assistant:
+
+```sh
+claude mcp add alsa -- alsa-mcp        # Claude Code
+```
+
+For Claude Desktop and other clients that read a JSON config, add it to `mcpServers`. Use the full path
+from `which alsa-mcp` if the client doesn't see your `PATH`:
+
+```json
+{
+  "mcpServers": {
+    "alsa": {"command": "alsa-mcp"}
+  }
+}
+```
+
+For Codex, in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.alsa]
+command = "alsa-mcp"
+```
+
+It has one tool, `search_bus(origin, destination, date, adults=1)`, with the date as `DD/MM/YYYY`. It
+returns the same JSON as `alsa bus --format json`. An unknown station, a badly written date, a block or
+a timeout comes back as a tool error, never as an empty list.
+
 ## How it works
 
 1. Gets Imperva's cookies (Alsa's bot protection) and the CSRF token `p_auth` from alsa.es's home page,
