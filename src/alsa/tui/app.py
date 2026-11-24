@@ -40,7 +40,7 @@ class AlsaApp(App[None]):
     CSS_PATH = "app.tcss"
     ENABLE_COMMAND_PALETTE = False
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("ctrl+q", "quit", "salir", show=False, priority=True),
+        Binding("ctrl+q", "quit", "salir", priority=True),
         Binding("ctrl+r", "reload_stations", show=False),
     ]
 

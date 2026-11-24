@@ -101,7 +101,7 @@ class SearchScreen(Screen):
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("ctrl+x", "swap", "intercambiar"),
-        Binding("f1", "app.help", "ayuda"),
+        Binding("f1", "app.help", "ayuda", key_display="fn+F1"),
     ]
 
     def __init__(self) -> None:
@@ -355,7 +355,8 @@ class ResultsScreen(Screen):
         Binding("t", "toggle_filter", "filtro de hora"),
         Binding("p", "toggle_sold_out", "agotados"),
         Binding("r", "reload", "actualizar", show=False),
-        Binding("f1", "app.help", "ayuda"),
+        Binding("question_mark", "app.help", "ayuda", key_display="?"),
+        Binding("f1", "app.help", show=False),
     ]
 
     def __init__(self, req: SearchRequest) -> None:
@@ -719,13 +720,17 @@ HELP = [
     ("p", "ocultar o mostrar los agotados"),
     ("esc", "volver a la búsqueda"),
     ("General", ""),
-    ("f1", "esta ayuda"),
+    ("? / fn+F1", "esta ayuda (? solo en resultados)"),
     ("ctrl+q", "salir"),
 ]
 
 
 class HelpScreen(ModalScreen[None]):
-    BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "close", "cerrar"), Binding("f1", "close", show=False)]
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "close", "cerrar"),
+        Binding("f1", "close", show=False),
+        Binding("question_mark", "close", show=False),
+    ]
 
     def compose(self) -> ComposeResult:
         text = Text()
