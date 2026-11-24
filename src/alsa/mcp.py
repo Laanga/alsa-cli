@@ -5,8 +5,17 @@ Una herramienta sobre alsa.core.search_bus — el mismo núcleo que el CLI.
 
 from __future__ import annotations
 
-from fastmcp import FastMCP
+import sys
 
+try:
+    from fastmcp import FastMCP
+except ImportError:  # instalado sin el extra mcp
+    sys.exit(
+        "alsa-mcp necesita el extra mcp. Reinstala con:\n"
+        '  uv tool install --force "alsa-cli[mcp] @ git+https://github.com/ahorrandocon20/alsa-cli"'
+    )
+
+from alsa.cli import _check_date
 from alsa.core import get_station_id
 from alsa.core import search_bus as _search_bus_core
 
@@ -33,9 +42,11 @@ def search_bus(
         cada uno con horarios, duración, transbordos, tipo de servicio
         (Comfort, Supra…) y tarifas desglosadas. El campo shop.url abre
         en alsa.es la lista de buses de esta búsqueda para comprar. Un bloqueo de
-        Imperva o una estación desconocida devuelven error de herramienta,
-        no un resultado vacío.
+        Imperva, una estación desconocida o una fecha mal escrita devuelven
+        error de herramienta, no un resultado vacío.
     """
+    if error := _check_date(date):
+        raise ValueError(error)
     origin_id = origin if origin.isdigit() else get_station_id(origin)
     destination_id = destination if destination.isdigit() else get_station_id(destination)
     journeys, retries, shop_url = _search_bus_core(origin_id, destination_id, date, adults)

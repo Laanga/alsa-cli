@@ -23,6 +23,7 @@ mcp = ["fastmcp>=3.2"]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=1.5.0",
+    "fastmcp>=3.2",
 ]
 
 [build-system]
