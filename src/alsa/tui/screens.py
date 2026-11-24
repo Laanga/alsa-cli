@@ -97,7 +97,8 @@ def describe_filter(req: SearchRequest) -> str:
 class SearchScreen(Screen):
     """Formulario: desde, hasta, día, hora y viajeros."""
 
-    VERTICAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] = [(0, "-tiny"), (27, "-short"), (37, "-tall")]
+    VERTICAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] = [(0, "-tiny"), (22, "-compact"), (24, "-roomy"), (31, "-short"), (37, "-tall")]
+    HORIZONTAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] = [(0, "-narrow"), (78, "-wide")]
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("ctrl+x", "swap", "intercambiar"),
@@ -177,6 +178,7 @@ class SearchScreen(Screen):
         else:
             status.update("")
             status.remove_class("-error")
+        status.set_class(not error and getattr(self.app, "stations", None) is not None, "-empty")
         for field in self.query(StationField):
             if field.input.has_focus:
                 field.refresh_suggestions()

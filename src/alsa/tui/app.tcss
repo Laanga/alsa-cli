@@ -24,15 +24,52 @@ Screen {
     border-bottom: double $panel-lighten-2;
 }
 
-SearchScreen.-short #scene,
+#search-scroll {
+    align-vertical: middle;
+}
+
 SearchScreen.-tiny #scene,
 SearchScreen.-tiny #title,
-SearchScreen.-tiny #tagline {
+SearchScreen.-tiny #tagline,
+SearchScreen.-compact #tagline,
+SearchScreen.-compact #links,
+SearchScreen.-roomy #tagline,
+SearchScreen.-roomy #links,
+SearchScreen.-narrow #day-label,
+SearchScreen.-short #tagline,
+SearchScreen.-short #links {
     display: none;
 }
 
-SearchScreen.-short #tagline {
-    margin-bottom: 1;
+/* Terminal por defecto (80x24) o algo menor: autocar más bajo y formulario sin huecos. */
+SearchScreen.-compact #title,
+SearchScreen.-roomy #title {
+    margin: 0;
+}
+
+SearchScreen.-compact #scene,
+SearchScreen.-roomy #scene {
+    height: 10;
+    margin: 0;
+    border-bottom: none;
+}
+
+SearchScreen.-short #scene {
+    height: 11;
+    margin: 0;
+}
+
+SearchScreen.-compact #form {
+    padding: 0 1;
+}
+
+SearchScreen.-compact .row,
+SearchScreen.-roomy .row {
+    margin-bottom: 0;
+}
+
+#stations-status.-empty {
+    display: none;
 }
 
 #form {
@@ -163,6 +200,14 @@ Center {
 #time-row Select {
     width: 19;
     margin-right: 2;
+}
+
+SearchScreen.-narrow .field-label {
+    width: 10;
+}
+
+SearchScreen.-narrow #time-row Select {
+    margin-right: 1;
 }
 
 #time-row SelectCurrent {

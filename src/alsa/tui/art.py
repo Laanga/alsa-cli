@@ -194,10 +194,9 @@ SCENE_PALETTE = {
     "a": "#232b3a",  # asfalto
     "m": "#6f7a8e",  # línea discontinua
 }
-GROUND = SCENE_HEIGHT - 2
 
 
-def _skyline_column(x: int) -> list[tuple[int, str]]:
+def _skyline_column(x: int, ground: int) -> list[tuple[int, str]]:
     """Píxeles de fondo de la columna `x`, deterministas para poder desplazar el skyline."""
     block, inner = divmod(x, 7)
     seed = (block * 2654435761) & 0xFFFFFFFF
@@ -205,29 +204,32 @@ def _skyline_column(x: int) -> list[tuple[int, str]]:
     body = "j" if (seed >> 5) % 3 == 0 else "k"
     if inner == 6:
         return []
-    top = GROUND - height
+    top = max(0, ground - height)
     pixels = []
-    for y in range(top, GROUND):
+    for y in range(top, ground):
         ch = body
-        if inner in (1, 3) and (y - top) % 2 == 1 and y < GROUND - 1:
+        if inner in (1, 3) and (y - top) % 2 == 1 and y < ground - 1:
             ch = "l" if ((seed >> (y % 13)) ^ block ^ y) % 6 == 0 else "o"
         pixels.append((y, ch))
     return pixels
 
 
-def scene_text(width: int, bus_x: int | None, frame: int = 0, scroll: int = 0, bounce: int = 0) -> Text:
-    """Skyline, carretera y autocar en `bus_x` (None = sin autocar)."""
-    grid = [["." for _ in range(width)] for _ in range(SCENE_HEIGHT)]
+def scene_text(
+    width: int, bus_x: int | None, frame: int = 0, scroll: int = 0, bounce: int = 0, height: int = SCENE_HEIGHT
+) -> Text:
+    """Skyline, carretera y autocar en `bus_x` (None = sin autocar); `height` en píxeles."""
+    ground = height - 2
+    grid = [["." for _ in range(width)] for _ in range(height)]
     for x in range(width):
-        for y, ch in _skyline_column(x + scroll // 3):
+        for y, ch in _skyline_column(x + scroll // 3, ground):
             grid[y][x] = ch
-        grid[GROUND][x] = "a"
-        grid[GROUND + 1][x] = "m" if (x + scroll) % 8 < 4 else "a"
+        grid[ground][x] = "a"
+        grid[ground + 1][x] = "m" if (x + scroll) % 8 < 4 else "a"
     if bus_x is not None:
-        top = GROUND - BUS_HEIGHT - bounce
+        top = ground - BUS_HEIGHT - bounce
         for by, row in enumerate(bus_bitmap(frame)):
             for bx, ch in enumerate(row):
                 x = bus_x + bx
-                if ch != "." and 0 <= x < width and 0 <= top + by < SCENE_HEIGHT:
+                if ch != "." and 0 <= x < width and 0 <= top + by < height:
                     grid[top + by][x] = ch
     return render(["".join(row) for row in grid], lambda x, y, ch: SCENE_PALETTE.get(ch))

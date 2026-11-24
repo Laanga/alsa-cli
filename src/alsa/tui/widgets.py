@@ -55,7 +55,7 @@ class BusScene(Widget):
 
     def render(self) -> Text:
         x = self._center if self._x is None else round(self._x)
-        return scene_text(self.size.width, x, self._frame, self._scroll, self._bounce)
+        return scene_text(self.size.width, x, self._frame, self._scroll, self._bounce, self.size.height * 2 or SCENE_HEIGHT)
 
     def arrive(self) -> None:
         """El autocar entra por la derecha y frena en el centro."""
