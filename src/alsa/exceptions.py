@@ -34,7 +34,7 @@ class AlsaAuthError(AlsaError):
         suffix = f" ({detail})" if detail else ""
         super().__init__(
             f"Alsa rechazó el token de sesión{suffix}. "
-            "Se obtiene uno nuevo y reintenta automáticamente."
+            "Vuelve a lanzar la búsqueda: cada búsqueda abre una sesión nueva."
         )
 
 

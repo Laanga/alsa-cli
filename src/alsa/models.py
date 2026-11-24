@@ -24,7 +24,7 @@ class Fare:
 
     price: float
     fare_name: str
-    fare_type: str  # "FLX", "STD", etc.
+    fare_type: str  # "BASE", "FLX", etc.
     fare_conditions: str
 
 

@@ -10,8 +10,8 @@ Flujo (descubierto con ingeniería inversa sobre el HAR real de alsa.es):
 
 Reintentos (mismo patrón que renfe-cli): hasta 3 intentos por petición,
 1 s y 2 s de pausa, solo para errores 5xx y conexiones caídas. Nunca para
-bloqueos (403/429), timeouts ni páginas HTML de Imperva. Cada reintento
-queda en la lista `retries` de la respuesta.
+bloqueos (403/429), timeouts ni la página de bloqueo de Imperva. Cada petición
+que se recupera tras reintentar queda en la lista `retries` de la respuesta.
 """
 
 from __future__ import annotations
@@ -26,12 +26,14 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from curl_cffi import requests as curl_requests
+from curl_cffi.requests.exceptions import RequestException, Timeout
 
 from alsa.exceptions import (
     AlsaAuthError,
     AlsaBlockedError,
     AlsaConnectionError,
     AlsaParseError,
+    AlsaTimeoutError,
 )
 from alsa.models import Fare, Journey, Package
 
@@ -43,6 +45,7 @@ PORTLET_NS = f"_{PORTLET_ID}"
 REQUEST_TIMEOUT = 60  # segundos
 RETRY_Pauses = (1.0, 2.0)  # segundos antes del segundo y tercer intento
 RETRY_STATUSES = (500, 502, 503, 504)
+IMPERVA_BLOCK_MARK = "Incapsula incident ID"  # texto de la página de bloqueo, no de las páginas normales
 
 
 def _request_with_retries(
@@ -56,38 +59,35 @@ def _request_with_retries(
     """Hace una petición con hasta 3 intentos, igual que renfe-cli.
 
     Reintenta solo errores 5xx y conexiones caídas; bloqueos (403/429),
-    timeouts y páginas de bot paran inmediatamente.
+    la página de bloqueo de Imperva y timeouts paran al primer intento.
+    Si un reintento acaba bien, queda anotado en `retries_log`.
     """
     errors: list[str] = []
+    max_tries = len(RETRY_Pauses) + 1
 
-    for attempt in range(1, len(RETRY_Pauses) + 2):
+    for attempt in range(1, max_tries + 1):
         try:
             if method == "GET":
                 resp = session.get(url, timeout=REQUEST_TIMEOUT, **kwargs)
             else:
                 resp = session.post(url, timeout=REQUEST_TIMEOUT, **kwargs)
-
-            if resp.status_code in (403, 429):
+        except Timeout as e:
+            raise AlsaTimeoutError(REQUEST_TIMEOUT) from e
+        except RequestException as e:
+            errors.append(f"connection dropped ({type(e).__name__})")
+        else:
+            if resp.status_code in (403, 429) or IMPERVA_BLOCK_MARK in resp.text:
                 raise AlsaBlockedError()
-            if resp.status_code in RETRY_STATUSES and attempt <= len(RETRY_Pauses):
-                errors.append(f"server error ({resp.status_code})")
-                if attempt < len(RETRY_Pauses) + 1:
-                    time.sleep(RETRY_Pauses[attempt - 1])
-                continue
-            return resp
+            if resp.status_code not in RETRY_STATUSES:
+                if errors:
+                    retries_log.append({"request": label, "tries": attempt, "errors": errors})
+                return resp
+            errors.append(f"server error ({resp.status_code})")
 
-        except AlsaBlockedError:
-            raise  # un bloqueo nunca se reintenta
-        except Exception as e:
-            if attempt <= len(RETRY_Pauses):
-                errors.append(f"connection dropped ({type(e).__name__})")
-                if attempt < len(RETRY_Pauses) + 1:
-                    time.sleep(RETRY_Pauses[attempt - 1])
-                continue
-            raise AlsaConnectionError(str(e)) from e
+        if attempt < max_tries:
+            time.sleep(RETRY_Pauses[attempt - 1])
 
-    # si llegamos aquí, agotamos los reintentos
-    raise AlsaConnectionError(f"{label} falló tras {len(RETRY_Pauses) + 1} intentos")
+    raise AlsaConnectionError(f"{label} falló tras {max_tries} intentos ({errors[-1]})")
 
 
 def search_bus(

@@ -1,8 +1,14 @@
-"""Tests offline del parser de journeys: precios, horarios y tipos."""
+"""Tests offline del parser de journeys y de los reintentos de las peticiones a alsa.es."""
 
 from zoneinfo import ZoneInfo
 
-from alsa.core import _parse_journeys
+import pytest
+from curl_cffi.requests.exceptions import ConnectionError as CurlConnectionError
+from curl_cffi.requests.exceptions import Timeout
+
+from alsa import core
+from alsa.core import _parse_journeys, _request_with_retries
+from alsa.exceptions import AlsaBlockedError, AlsaConnectionError, AlsaTimeoutError
 
 TZ = ZoneInfo("Europe/Madrid")
 
@@ -135,3 +141,83 @@ def test_parse_marca_agotados_con_canbesold_f():
     journeys = _parse_journeys(data)
     assert [j.available for j in journeys] == [False, True]
     assert journeys[0].to_dict()["available"] is False
+
+
+class FakeResponse:
+    def __init__(self, status_code: int, text: str = "ok"):
+        self.status_code = status_code
+        self.text = text
+
+
+class FakeSession:
+    """Devuelve (o lanza) las respuestas en orden y cuenta cuántas peticiones recibe."""
+
+    def __init__(self, *outcomes: FakeResponse | Exception):
+        self.outcomes = list(outcomes)
+        self.calls = 0
+
+    def get(self, *args, **kwargs) -> FakeResponse:
+        self.calls += 1
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+@pytest.fixture(autouse=True)
+def sin_pausas(monkeypatch):
+    monkeypatch.setattr(core, "RETRY_Pauses", (0, 0))
+
+
+def test_reintento_que_se_recupera_queda_en_retries():
+    session = FakeSession(FakeResponse(503), CurlConnectionError("reset"), FakeResponse(200))
+    log: list[dict] = []
+
+    resp = _request_with_retries(session, "GET", "https://alsa.test", "home", log)
+
+    assert resp.status_code == 200
+    assert log == [
+        {"request": "home", "tries": 3, "errors": ["server error (503)", "connection dropped (ConnectionError)"]}
+    ]
+
+
+def test_tres_errores_de_servidor_paran_con_error():
+    session = FakeSession(FakeResponse(503), FakeResponse(502), FakeResponse(500))
+
+    with pytest.raises(AlsaConnectionError, match="falló tras 3 intentos"):
+        _request_with_retries(session, "GET", "https://alsa.test", "home", [])
+    assert session.calls == 3
+
+
+def test_timeout_no_se_reintenta():
+    session = FakeSession(Timeout("lento"), FakeResponse(200))
+
+    with pytest.raises(AlsaTimeoutError):
+        _request_with_retries(session, "GET", "https://alsa.test", "home", [])
+    assert session.calls == 1
+
+
+def test_pagina_de_bloqueo_de_imperva_es_un_bloqueo():
+    blocked = FakeResponse(200, "<html>Request unsuccessful. Incapsula incident ID: 123</html>")
+    session = FakeSession(blocked, FakeResponse(200))
+
+    with pytest.raises(AlsaBlockedError):
+        _request_with_retries(session, "GET", "https://alsa.test", "home", [])
+    assert session.calls == 1
+
+
+def test_403_es_un_bloqueo_sin_reintento():
+    session = FakeSession(FakeResponse(403), FakeResponse(200))
+
+    with pytest.raises(AlsaBlockedError):
+        _request_with_retries(session, "GET", "https://alsa.test", "home", [])
+    assert session.calls == 1
+
+
+def test_respuesta_a_la_primera_no_anota_reintentos():
+    session = FakeSession(FakeResponse(200))
+    log: list[dict] = []
+
+    _request_with_retries(session, "GET", "https://alsa.test", "home", log)
+
+    assert log == []
