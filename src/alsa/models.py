@@ -74,24 +74,6 @@ class Journey:
             ],
         }
 
-    @classmethod
-    def from_dict(cls, d: dict) -> Journey:
-
-        return cls(
-            origin_id=d["origin_id"],
-            origin_name=d["origin_name"],
-            destination_id=d["destination_id"],
-            destination_name=d["destination_name"],
-            departure=datetime.fromisoformat(d["departure"]),
-            arrival=datetime.fromisoformat(d["arrival"]),
-            duration_minutes=d["duration_minutes"],
-            transfers=d["transfers"],
-            service_type=d["service_type"],
-            fares=[Fare(**f) for f in d.get("fares", [])],
-            line_name=d.get("line_name", ""),
-            available=d.get("available", True),
-        )
-
 
 @dataclass(frozen=True)
 class Package:

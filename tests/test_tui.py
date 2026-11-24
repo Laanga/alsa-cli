@@ -1,5 +1,6 @@
 """Tests offline de la TUI: autocompletado, filtros, formato y el flujo completo con datos falsos."""
 
+import re
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -121,10 +122,14 @@ def test_formato_espanol():
 # --- CLI ------------------------------------------------------------------------
 
 
-def test_alsa_sin_terminal_muestra_la_ayuda_y_no_abre_la_tui():
+def test_alsa_sin_terminal_muestra_la_ayuda_y_no_abre_la_tui(monkeypatch):
+    def tui_abierta():
+        raise AssertionError("no debe abrir la TUI sin terminal")
+
+    monkeypatch.setattr(app_module, "run", tui_abierta)
     result = CliRunner().invoke(cli_app, [])
     assert result.exit_code == 0
-    assert "bus" in result.output and "stations" in result.output
+    assert re.search(r"\bbus\b", result.output) and re.search(r"\bstations\b", result.output)
 
 
 # --- flujo completo con Textual -------------------------------------------------
@@ -132,7 +137,7 @@ def test_alsa_sin_terminal_muestra_la_ayuda_y_no_abre_la_tui():
 
 @pytest.fixture
 def fake_alsa(monkeypatch):
-    calls: dict[str, list] = {"browser": [], "checkout": []}
+    calls: dict[str, list] = {"browser": [], "checkout": [], "search": []}
 
     def fake_checkout(selection, on_step=None):
         for n in range(4):
@@ -141,7 +146,11 @@ def fake_alsa(monkeypatch):
         return "Flexible"
 
     monkeypatch.setattr(app_module, "get_all_stations", lambda: STATIONS)
-    monkeypatch.setattr(screens, "search_bus", lambda o, d, day, adults: (list(JOURNEYS), [], "https://alsa.test"))
+    def fake_search(*args):
+        calls["search"].append(args)
+        return list(JOURNEYS), [], "https://alsa.test"
+
+    monkeypatch.setattr(screens, "search_bus", fake_search)
     monkeypatch.setattr(purchase, "get_packages", lambda *args: list(PACKAGES))
     monkeypatch.setattr(purchase, "open_checkout", fake_checkout)
     monkeypatch.setattr(purchase.webbrowser, "open", lambda url, new=2: calls["browser"].append(url) or True)
@@ -167,6 +176,7 @@ async def test_flujo_completo_hasta_datos_del_viajero_en_chrome(fake_alsa):
         results = app.screen
         assert results.req.origin.id == "90155"
         assert results.req.destination.id == "90186"
+        assert fake_alsa["search"] == [("90155", "90186", date.today().strftime("%d/%m/%Y"), 1)]
         assert [j.departure.strftime("%H:%M") for j in results.shown] == ["08:15", "14:00", "21:30"]
 
         await pilot.press("down", "enter")
@@ -211,6 +221,7 @@ async def test_filtro_sin_resultados_explica_por_que(fake_alsa):
     async with app.run_test(size=(110, 40)) as pilot:
         app.push_screen(ResultsScreen(_req(depart_after="23:00")))
         await _wait_for(pilot, lambda: isinstance(app.screen, ResultsScreen) and app.screen.phase == "message")
+        assert "Ningún autobús encaja con la hora" in str(app.screen.query_one("#message-text").render())
         await pilot.press("t")
         await _wait_for(pilot, lambda: app.screen.phase == "list")
         assert len(app.screen.shown) == 3
