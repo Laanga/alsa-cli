@@ -103,6 +103,7 @@ left out here:
 - `fares` is what Alsa's results list shows for each bus: usually a single price, the cheapest one. The
   full set of fares for a bus (Básica, Flexible, Superflexible) is shown in the TUI.
 - `available` is `false` when Alsa has no seats left on that bus.
+- `cheapest_price_eur` is `null` when Alsa shows no price for a bus.
 - `shop.url` opens alsa.es with the same search, to pick the bus and fare and pay there.
 - `retries` lists the requests that failed and worked on a later try (see below), with `request`, `tries`
   and `errors`. It's empty when nothing was retried.

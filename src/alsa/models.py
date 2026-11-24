@@ -62,7 +62,7 @@ class Journey:
             "service_type": self.service_type,
             "line_name": self.line_name,
             "available": self.available,
-            "cheapest_price_eur": round(self.cheapest_price, 2),
+            "cheapest_price_eur": round(self.cheapest_price, 2) if self.fares else None,
             "fares": [
                 {
                     "price": f.price,

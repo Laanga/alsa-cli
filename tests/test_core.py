@@ -114,7 +114,8 @@ def test_parse_journey_sin_fares_no_revierta():
 
     assert len(journeys) == 1
     assert journeys[0].fares == []
-    assert journeys[0].cheapest_price == float("inf")
+    assert journeys[0].cheapest_price == float("inf")  # al final al ordenar por precio
+    assert journeys[0].to_dict()["cheapest_price_eur"] is None  # JSON válido, no Infinity
 
 
 def test_parse_vacio_devuelve_lista_vacia():
