@@ -17,7 +17,7 @@ from textual.events import Click, DescendantBlur
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
-from textual.widgets import Button, Input, OptionList
+from textual.widgets import Button, Input, OptionList, Select
 from textual.widgets.option_list import Option
 
 from alsa.tui import fmt
@@ -253,16 +253,55 @@ def _station_prompt(st: StationOption) -> Text:
     return text
 
 
+ARROW_FOCUS: list[BindingType] = [
+    Binding("left", "row_focus(-1)", show=False),
+    Binding("right", "row_focus(1)", show=False),
+]
+
+
+def focus_in_row(widget: Widget, step: int) -> None:
+    """Pasa el foco al control vecino de la misma fila; en los extremos no se mueve."""
+    row = [w for w in widget.parent.children if w.focusable] if widget.parent else []
+    i = row.index(widget) + step if widget in row else -1
+    if 0 <= i < len(row):
+        row[i].focus()
+
+
 class Chip(Button):
     """Botón compacto que se recorre con ← y →."""
 
-    BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("left", "app.focus_previous", show=False),
-        Binding("right", "app.focus_next", show=False),
-    ]
+    BINDINGS: ClassVar[list[BindingType]] = ARROW_FOCUS
+
+    def action_row_focus(self, step: int) -> None:
+        focus_in_row(self, step)
 
     def __init__(self, label: str, *, id: str | None = None, classes: str = "") -> None:
         super().__init__(label, id=id, classes=f"chip {classes}".strip(), compact=True)
+
+
+class Stepper(Button):
+    """Botón − o + de viajeros, que se recorre con ← y →."""
+
+    BINDINGS: ClassVar[list[BindingType]] = ARROW_FOCUS
+
+    def __init__(self, label: str, *, id: str) -> None:
+        super().__init__(label, id=id, classes="stepper", compact=True)
+
+    def action_row_focus(self, step: int) -> None:
+        focus_in_row(self, step)
+
+
+class TimeSelect(Select[str]):
+    """Desplegable de hora que, cerrado, se recorre con ← y →."""
+
+    BINDINGS: ClassVar[list[BindingType]] = ARROW_FOCUS
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # abierto, las flechas son de la lista de horas
+        return not self.expanded if action == "row_focus" else True
+
+    def action_row_focus(self, step: int) -> None:
+        focus_in_row(self, step)
 
 
 class MonthCalendar(Widget, can_focus=True):
