@@ -13,7 +13,8 @@ from rich.text import Text
 from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.message import Message
 from textual.screen import ModalScreen, Screen
 from textual.widget import Widget
 from textual.widgets import Button, ContentSwitcher, DataTable, Footer, Label, Static
@@ -24,7 +25,15 @@ from alsa.exceptions import AlsaError
 from alsa.models import BusTracking, Journey, TrackedLeg, map_url
 from alsa.tracking import track_route
 from alsa.tui import fmt
-from alsa.tui.art import MINI_BUS_WIDTH, STRIP_HEIGHT, route_strip
+from alsa.tui.art import MINI_BUS_WIDTH, STRIP_HEIGHT, render, route_strip
+from alsa.tui.spain_map import (
+    BUS_COLORS,
+    CASING,
+    MAP_SYMBOLS,
+    TODO,
+    map_pixels,
+    render_pixels,
+)
 from alsa.tui.widgets import BusScene
 
 if TYPE_CHECKING:
@@ -292,6 +301,140 @@ class TrackTarget:
         )
 
 
+class MapView(Widget):
+    """Mapa de píxeles de España con la ruta y el autobús; el halo del autobús parpadea."""
+
+    DEFAULT_CSS = """
+    MapView {
+        width: 1fr;
+        height: 1fr;
+    }
+    """
+
+    class SymbolsChanged(Message):
+        """El encuadre o las superposiciones han cambiado las marcas visibles."""
+
+    def __init__(self, *, id: str | None = None) -> None:
+        super().__init__(id=id)
+        self.tracking: BusTracking | None = None
+        self.zoom = True
+        self.stale = False
+        self.symbols: set[str] = set()
+        self._blink = False
+        self._frames: dict[bool, Text] = {}
+        self._dimensions = (0, 0)
+
+    def on_mount(self) -> None:
+        self.set_interval(0.6, self._tick)
+
+    def show(self, tracking: BusTracking | None, zoom: bool, stale: bool) -> None:
+        if tracking is not self.tracking or zoom != self.zoom:
+            self._frames.clear()
+        self.tracking, self.zoom, self.stale = tracking, zoom, stale
+        self.refresh()
+
+    def _tick(self) -> None:
+        if not self.stale and self.tracking and BUS_COLORS["B"] in self.symbols:
+            self._blink = not self._blink
+            self.refresh()
+
+    def render(self) -> Text:
+        width, height = self.size
+        if not width or not height:
+            return Text("")
+        if self._dimensions != (width, height):
+            self._dimensions = (width, height)
+            self._frames.clear()
+        hide_halo = self.stale or self._blink
+        if hide_halo not in self._frames:
+            pixels = map_pixels(width, height * 2, self.tracking, self.zoom, hide_halo)
+            self._frames[hide_halo] = render_pixels(pixels)
+            colors = {color for row in pixels for color in row}
+            visible = {key for key, _, _, _ in MAP_SYMBOLS if key in colors}
+            if visible != self.symbols:
+                self.symbols = visible
+                self.post_message(self.SymbolsChanged())
+        return self._frames[hide_halo]
+
+
+def map_legend(t: BusTracking, visible: set[str], stale: bool = False) -> Text:
+    """Muestras de los mismos píxeles que hay en este encuadre, en dos filas."""
+    text = headline(t)
+    if where := whereabouts(t):
+        text.append("\n")
+        text.append_text(where)
+    for group in (MAP_SYMBOLS[:3], MAP_SYMBOLS[3:]):
+        samples = []
+        for key, bitmap, palette, label in group:
+            if key not in visible:
+                continue
+            if key == TODO and not t.located:
+                label = "Tu trayecto"
+            if stale and key == BUS_COLORS["B"]:
+                palette = {**palette, "y": CASING}
+            lines = render(bitmap, lambda x, y, ch, colors=palette: colors[ch]).split("\n")
+            samples.append((lines, label))
+        if not samples:
+            continue
+        height = max(len(lines) for lines, _ in samples)
+        for row in range(height + 1):
+            text.append("\n")
+            for lines, label in samples:
+                if row == height:
+                    cell = Text(label, "dim")
+                else:
+                    offset = height - len(lines)
+                    cell = lines[row - offset].copy() if row >= offset else Text()
+                cell.align("center", max(len(label), lines[0].cell_len))
+                text.append_text(cell)
+                text.append(" ")
+    return text
+
+
+def map_stops(t: BusTracking) -> Text:
+    """Paradas que el autocar aún visitará hasta tu destino, también antes de recogerte."""
+    text = Text()
+    v = t.vehicle
+    if v is None or t.destination_stop is None:
+        return text
+    end = t.destination_stop
+    if t.status == "arrived":
+        return Text("Has llegado a tu destino · 0 paradas pendientes", "bold #4ade80")
+
+    if t.located and t.next_stop is not None:
+        first = t.next_stop
+        if t.at_stop:
+            stop = v.stops[first]
+            first += 1
+            text.append(f"Parado en {fmt.place(stop.town or stop.name)}", "bold #40c8ec")
+            text.append(f" · salida {fmt.hm(stop.departure)} (horario)\n", "dim")
+        count = end - first + 1
+        title = "1 parada hasta tu destino" if count == 1 else f"{count} paradas hasta tu destino"
+    else:
+        first = t.origin_stop or 0
+        title = "Paradas de tu viaje · horario"
+    text.append(title, "bold")
+    for i in range(first, end + 1):
+        stop = v.stops[i]
+        scheduled = stop.departure if i == t.origin_stop else stop.arrival
+        eta = t.estimated_departure if i == t.origin_stop else None
+        if eta is None and t.estimated_stops:
+            eta = t.estimated_stops[i]
+        text.append("\n")
+        when = fmt.arrival(v.stops[0].departure, eta or scheduled)
+        text.append(f"≈ {when}" if eta else f"  {when}", "bold #40c8ec" if i == first and t.located else "bold")
+        text.append(f"  {fmt.place(stop.town or stop.name)}")
+        if i == t.origin_stop:
+            text.append(" · tu salida", "dim")
+        if not eta and t.located:
+            text.append(" (horario)", "dim")
+        if stop.town and stop.name and stop.town.casefold() != stop.name.casefold():
+            text.append(f" · {fmt.place(stop.name)}", "dim")
+    if t.located and t.estimated_stops:
+        text.append("\n≈ hora estimada", "dim")
+    return text
+
+
 def find_leg(trackings: list[BusTracking], target: TrackTarget, now: datetime) -> BusTracking | None:
     """Identifica el viaje de los resultados y elige su tramo actual o el siguiente."""
     # track_route ya ha filtrado por hora y parada de salida. Comprobamos la fecha
@@ -320,9 +463,15 @@ class TrackingScreen(ModalScreen[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "close", "volver"),
         Binding("r", "refresh", "actualizar"),
-        Binding("m", "open_map", "ver en el mapa"),
+        Binding("m", "open_map", "mapa en el navegador"),
+        Binding("right", "view('mapa')", "mapa", show=False),
+        Binding("left", "view('ruta')", "ruta", show=False),
+        Binding("z", "toggle_zoom", "zoom", show=False),
+        Binding("down", "scroll_stops(1)", "paradas siguientes", show=False),
+        Binding("up", "scroll_stops(-1)", "paradas anteriores", show=False),
     ]
     VERTICAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] = [(0, "-short"), (32, "-tall")]
+    HORIZONTAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] = [(0, "-narrow"), (76, "-wide")]
 
     def __init__(self, target: TrackTarget, tracking: BusTracking | None = None, checked_at: datetime | None = None) -> None:
         super().__init__()
@@ -332,6 +481,8 @@ class TrackingScreen(ModalScreen[None]):
         self._busy = False
         self._refresh_error = ""
         self._started = 0.0
+        self.view = "ruta"
+        self.zoom = True
 
     def compose(self) -> ComposeResult:
         j = self.target
@@ -344,14 +495,21 @@ class TrackingScreen(ModalScreen[None]):
         with Vertical(id="tracking-box", classes="dialog"):
             yield Label("Dónde va tu autobús", classes="dialog-title")
             yield Static(summary, id="tracking-summary")
-            yield RouteStrip(id="tracking-strip")
-            yield Static(id="tracking-headline", classes="dialog-text")
-            yield Static(id="tracking-stops", classes="dialog-text")
+            yield Static(id="tracking-tabs")
+            with Vertical(id="route-view"):
+                yield RouteStrip(id="tracking-strip")
+                yield Static(id="tracking-headline", classes="dialog-text")
+                yield Static(id="tracking-stops", classes="dialog-text")
+            with Horizontal(id="map-view"):
+                yield MapView(id="tracking-map")
+                with VerticalScroll(id="map-sidebar"):
+                    yield Static(id="map-legend")
+                    yield Static(id="map-stops")
             yield Static(id="tracking-note", classes="dialog-text")
             with Horizontal(classes="dialog-buttons"):
                 yield Button("Volver", id="back", variant="primary", compact=True)
                 yield Button("Actualizar", id="refresh", compact=True, classes="link")
-                yield Button("Ver en el mapa", id="map", compact=True, classes="link")
+                yield Button("Mapa en el navegador", id="map", compact=True, classes="link")
 
     def on_mount(self) -> None:
         self.query_one("#back", Button).focus()
@@ -392,7 +550,8 @@ class TrackingScreen(ModalScreen[None]):
             self._refresh_error = str(error) if isinstance(error, AlsaError) else f"Error inesperado: {error}"
             if self.tracking is None:
                 self.query_one("#tracking-headline", Static).update("")
-            self.query_one(RouteStrip).show(self.tracking if self.tracking and self.tracking.vehicle else None, stale=True)
+            self._render_view()
+            self.query_one(RouteStrip).show(self.tracking if self._has_route() else None, stale=True)
             self._render_note()
             return
         self._refresh_error = ""
@@ -429,8 +588,45 @@ class TrackingScreen(ModalScreen[None]):
             self.query_one("#tracking-headline", Static).update(Text.assemble(headline(t), "\n", where) if where else headline(t))
         self.query_one("#tracking-stops", Static).update(stops_grid(t, fold=True) if t and t.vehicle else "")
         self.query_one("#map", Button).display = bool(self.check_action("open_map", ()))
+        if self.view == "mapa" and not self._has_route():
+            self.action_view("ruta")
+        self._render_view()
         self.refresh_bindings()
         self._render_note()
+
+    def _has_route(self) -> bool:
+        t = self.tracking
+        return bool(t and t.vehicle and t.vehicle.stops)
+
+    def _render_view(self) -> None:
+        """Pestañas, y el mapa con su leyenda si es la vista activa."""
+        tabs = Text()
+        if self._has_route():
+            for name in ("ruta", "mapa"):
+                active = name == self.view
+                tabs.append(f" {name} ", "bold #0b1220 on #40c8ec" if active else "dim")
+                if name == "ruta":
+                    tabs.append(" · ", "dim")
+            tabs.append("   ← → vista" if self.view == "mapa" else "   ← → cambia la vista", "dim italic")
+            if self.view == "mapa":
+                tabs.append("  ·  z " + ("España entera" if self.zoom else "zoom a tu viaje"), "dim")
+                tabs.append("  ·  ↑↓ paradas", "dim")
+                if self.check_action("open_map", ()):
+                    tabs.append("  ·  m navegador", "dim")
+        self.query_one("#tracking-tabs", Static).update(tabs)
+        self.query_one("#tracking-tabs", Static).display = self._has_route()
+        on_map = self.view == "mapa"
+        self.set_class(on_map, "-map")
+        widget = self.query_one(MapView)
+        widget.show(self.tracking if on_map else None, self.zoom, bool(self._refresh_error))
+        if on_map and self.tracking:
+            self._update_legend()
+            self.query_one("#map-stops", Static).update(map_stops(self.tracking))
+
+    @on(MapView.SymbolsChanged)
+    def _update_legend(self) -> None:
+        if self.view == "mapa" and self.tracking:
+            self.query_one("#map-legend", Static).update(map_legend(self.tracking, self.query_one(MapView).symbols, bool(self._refresh_error)))
 
     def _render_note(self) -> None:
         if self._refresh_error:
@@ -439,7 +635,9 @@ class TrackingScreen(ModalScreen[None]):
                 note.append(f"Última consulta a las {self.checked_at:%H:%M}. ", "bold")
             note.append(self._refresh_error)
             self.query_one("#tracking-note", Static).update(note)
+            self.query_one("#tracking-note").add_class("-error")
             return
+        self.query_one("#tracking-note").remove_class("-error")
         note = Text(style="dim")
         if self._busy and self.tracking is not None:
             note.append("Actualizando…  ")
@@ -452,11 +650,34 @@ class TrackingScreen(ModalScreen[None]):
 
     # --- acciones ---------------------------------------------------------------
 
+    def on_resize(self) -> None:
+        if self.view == "mapa":
+            self.call_after_refresh(self._render_view)
+
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action == "open_map":
             t = self.tracking
             return bool(t and t.vehicle and t.vehicle.latitude is not None and t.vehicle.longitude is not None)
+        if action == "view":
+            return self._has_route() and parameters[0] != self.view
+        if action in ("toggle_zoom", "scroll_stops"):
+            return self.view == "mapa"
         return True
+
+    def action_view(self, view: str) -> None:
+        if view == "mapa" and not self._has_route():
+            return
+        self.view = view
+        self._render_view()
+        self.refresh_bindings()
+
+    def action_scroll_stops(self, direction: int) -> None:
+        sidebar = self.query_one("#map-sidebar", VerticalScroll)
+        sidebar.scroll_relative(y=direction, animate=False)
+
+    def action_toggle_zoom(self) -> None:
+        self.zoom = not self.zoom
+        self._render_view()
 
     @on(Button.Pressed, "#map")
     def action_open_map(self) -> None:

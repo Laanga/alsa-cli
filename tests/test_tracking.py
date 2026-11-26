@@ -599,6 +599,231 @@ def test_watch_no_funciona_con_json(fake_track):
     assert fake_track == []
 
 
+# --- mapa de píxeles ------------------------------------------------------------------------
+
+
+def _color_distance(a: str, b: str) -> float:
+    return sum((int(a[i : i + 2], 16) - int(b[i : i + 2], 16)) ** 2 for i in (1, 3, 5)) ** 0.5
+
+
+def test_mapa_tiene_todas_las_comunidades_menos_canarias():
+    from alsa.tui.spain_map import REGION_COLORS, _polygons
+
+    regions = {region for region, _, _ in _polygons()}
+    assert set(REGION_COLORS) <= regions
+    assert "Canary Is." not in regions
+    assert {"PT", "FR"} <= regions  # los vecinos, en gris
+
+
+def test_comunidades_vecinas_no_tienen_colores_parecidos():
+    from alsa.tui.spain_map import REGION_COLORS, SPAIN, _fill, _polygons, area_for
+
+    width, height = 220, 160
+    south, north, west, east = SPAIN
+    grid = _fill(width, height, area_for([(south, west), (north, east)], width, height, pad=0))
+    polygons = _polygons()
+    neighbours = set()
+    for y in range(height - 1):
+        for x in range(width - 1):
+            for a, b in ((grid[y][x], grid[y][x + 1]), (grid[y][x], grid[y + 1][x])):
+                if a >= 0 and b >= 0:
+                    ra, rb = polygons[a][0], polygons[b][0]
+                    if ra != rb and ra in REGION_COLORS and rb in REGION_COLORS:
+                        neighbours.add(tuple(sorted((ra, rb))))
+    assert ("Castilla y León", "Madrid") in neighbours  # el raster encuentra las fronteras
+    for a, b in neighbours:
+        assert _color_distance(REGION_COLORS[a], REGION_COLORS[b]) > 60, (a, b)
+
+
+def test_mapa_pinta_el_autobus_tu_salida_y_lo_recorrido():
+    from alsa.tui.spain_map import BUS_COLORS, DONE, PIN, TODO, area_of, map_pixels
+
+    t = estimate(_leg(), _parse_vehicle(_route()), _at("10:53"))
+    width, height = 100, 80
+    pixels = map_pixels(width, height, t, zoom=True)
+    area = area_of(t, True, width, height)
+
+    def at(lat: float, lon: float) -> str:
+        x, y = area.to_px(lat, lon, width, height)
+        return pixels[round(y)][round(x)]
+
+    assert at(t.vehicle.latitude, t.vehicle.longitude) in BUS_COLORS.values()
+    flat = [color for row in pixels for color in row]
+    madrid = t.vehicle.stops[0]
+    assert at(madrid.latitude, madrid.longitude) == "#ffffff" and PIN in flat  # centro y borde del rombo
+    assert DONE in flat and TODO in flat  # lo recorrido y lo que queda
+
+
+def test_mapa_se_amplia_si_el_autobus_esta_fuera_de_espana():
+    from alsa.tui.spain_map import area_of
+
+    t = estimate(_leg(), _parse_vehicle(_route("48.85", "2.35")), _at("10:53"))  # en París
+    area = area_of(t, zoom=False, width=100, height=80)
+    assert area.north > 48.85 and area.west < 2.35 < area.west + area.lon_span
+
+
+def test_mapa_tiene_el_tamano_pedido():
+    from alsa.tui.spain_map import render_map
+
+    text = render_map(60, 40, None)
+    lines = text.plain.split("\n")
+    assert len(lines) == 20 and all(len(line) == 60 for line in lines)
+
+
+async def test_flechas_cambian_entre_ruta_y_mapa_y_z_el_zoom(live_app):
+    from alsa.tui.tracking import LiveRouteScreen, MapView, TrackingScreen
+
+    app_class, _ = live_app
+    app = app_class()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await _wait(pilot, lambda: app.stations is not None)
+        await pilot.press(*"mad", "enter", *"ovi", "enter", "ctrl+l")
+        await _wait(pilot, lambda: isinstance(app.screen, LiveRouteScreen) and app.screen.phase == "list")
+        await pilot.press("enter")
+        await _wait(pilot, lambda: isinstance(app.screen, TrackingScreen) and app.screen.tracking is not None)
+        screen = app.screen
+        assert screen.view == "ruta" and not screen.has_class("-map")
+
+        await pilot.press("right")
+        await pilot.pause(0.1)
+        assert screen.view == "mapa" and screen.has_class("-map") and screen.query_one(MapView).tracking is not None
+        assert "16 min tarde" in str(screen.query_one("#map-legend").render())
+        assert screen.zoom
+        await pilot.press("z")
+        assert not screen.zoom and "zoom a tu viaje" in str(screen.query_one("#tracking-tabs").render())
+
+        await pilot.press("left")
+        await pilot.pause(0.1)
+        assert screen.view == "ruta" and not screen.has_class("-map")
+
+
+async def test_sin_recorrido_no_hay_vista_mapa(live_app):
+    from alsa.tui.tracking import TrackingScreen, TrackTarget
+
+    app_class, _ = live_app
+    app = app_class()
+    async with app.run_test(size=(120, 40)) as pilot:
+        no_tracking = BusTracking(leg=_leg(dep="08:15", arr="14:00"), checked=True, status="no_tracking")
+        target = TrackTarget.from_leg(no_tracking.leg, "90155", "90186")
+        app.push_screen(TrackingScreen(target, no_tracking, _at("10:53")))
+        await pilot.pause(0.2)
+        await pilot.press("right")
+        await pilot.pause(0.1)
+        assert app.screen.view == "ruta" and not app.screen.query_one("#tracking-tabs").display
+
+
+def test_mapa_divide_el_tramo_entre_dos_paradas_en_la_posicion_del_bus():
+    from alsa.tui.spain_map import DONE, TODO, area_of, map_pixels
+
+    route = _route()
+    origin, destination = route["itinerario"][0], route["itinerario"][-2]
+    route["itinerario"] = [origin, destination]
+
+    def point(fraction):
+        return tuple(float(origin[k]) + fraction * (float(destination[k]) - float(origin[k])) for k in ("latitud", "longitud"))
+
+    lat, lon = point(0.5)
+    route["buses"] = [{"latitud": lat, "longitud": lon}]
+    t = estimate(_leg(), _parse_vehicle(route), _at("09:30"))
+    assert t.position == pytest.approx(0.5)
+    width, height = 100, 80
+    for zoom in (True, False):
+        area = area_of(t, zoom, width, height)
+        pixels = map_pixels(width, height, t, zoom)
+        for fraction, color in ((0.25, DONE), (0.75, TODO)):
+            x, y = (round(v) for v in area.to_px(*point(fraction), width, height))
+            assert any(color in row[x - 1 : x + 2] for row in pixels[y - 1 : y + 2])
+
+
+def test_paradas_del_mapa_hasta_tu_destino_con_horario_o_estimacion():
+    from alsa.tui.tracking import map_stops
+
+    vehicle = _parse_vehicle(_route())
+    t = estimate(_leg(), vehicle, _at("10:53"))
+    text = map_stops(t).plain
+    assert "2 paradas hasta tu destino" in text
+    assert "≈ 11:01  Leon" in text and "≈ 13:01  Oviedo" in text
+    assert "Gijón" not in text and "Valladolid" not in text
+
+    stopped = estimate(_leg(), _parse_vehicle(_route("42.59063", "-5.57722")), _at("10:55"))
+    text = map_stops(stopped).plain
+    assert "Parado en Leon · salida 11:00 (horario)" in text
+    assert "1 parada hasta tu destino" in text and "≈ 12:45  Oviedo" in text
+
+    leg = _leg(origin_id="139", origin="LEON", dep="11:00")
+    coming = map_stops(estimate(leg, vehicle, _at("10:53"))).plain
+    assert "2 paradas hasta tu destino" in coming and "≈ 11:16  Leon" in coming
+    for route in (_route(None), _route("41.38", "2.17")):
+        timetable = map_stops(estimate(leg, _parse_vehicle(route), _at("10:53"))).plain
+        assert "Paradas de tu viaje · horario" in timetable and "11:00  Leon" in timetable
+        assert "≈" not in timetable and "hasta tu destino" not in timetable
+    arrived = estimate(_leg(destination_id="139"), _parse_vehicle(_route("43.36951", "-5.85075")), _at("12:46"))
+    assert "0 paradas pendientes" in map_stops(arrived).plain
+
+
+@pytest.mark.parametrize("size", [(120, 40), (80, 24), (64, 24)])
+async def test_mapa_mantiene_la_ultima_lectura_y_avisa_hasta_recuperarse(live_app, monkeypatch, size):
+    from alsa.exceptions import AlsaTimeoutError
+    from alsa.tui import tracking as tui
+    from alsa.tui.spain_map import BUS_COLORS, MAP_SYMBOLS, map_pixels
+
+    app_class, _ = live_app
+    t = estimate(_leg(), _parse_vehicle(_route()), _at("10:53"))
+    answers = iter([AlsaTimeoutError(15), estimate(_leg(), _parse_vehicle(_route(None)), _at("10:54")), t])
+
+    def refresh(*args, **kwargs):
+        result = next(answers)
+        if isinstance(result, Exception):
+            raise result
+        return [result], []
+
+    monkeypatch.setattr(tui, "track_route", refresh)
+    app = app_class()
+    async with app.run_test(size=size) as pilot:
+        screen = tui.TrackingScreen(tui.TrackTarget.from_leg(t.leg, "90155", "90186"), t, _at("10:53"))
+        app.push_screen(screen)
+        await pilot.pause()
+        await pilot.press("right")
+        widget = screen.query_one(tui.MapView)
+        legend = screen.query_one("#map-legend")
+        await _wait(pilot, lambda: "Autobús" in str(legend.render()))
+        width, height = widget.size
+        colors = {color for row in map_pixels(width, height * 2, t) for color in row}
+        for key, _, _, label in MAP_SYMBOLS:
+            assert (label in str(legend.render())) == (key in colors)
+        assert screen.query_one("#map-stops").region.y >= legend.region.bottom
+        assert widget.size.height >= 4
+        sidebar = screen.query_one("#map-sidebar")
+        if size == (64, 24):
+            await pilot.press("down")
+            assert sidebar.scroll_y > 0
+            await pilot.press("up")
+            assert sidebar.scroll_y == 0
+
+        await pilot.press("r")
+        note = screen.query_one("#tracking-note")
+        await _wait(pilot, lambda: "No se pudo actualizar" in str(note.render()))
+        assert note.display and 0 < note.region.height and note.region.bottom < size[1]
+        assert "10:53" in str(note.render()) and "15 segundos" in str(note.render())
+        assert widget.tracking is t and screen.checked_at == _at("10:53")
+        before = widget.render()
+        widget._tick()
+        assert widget.render() == before and widget.stale
+        await pilot.press("left", "right", "z")
+        assert note.display and widget.stale
+        await pilot.press("r")
+        await _wait(pilot, lambda: screen.tracking.status == "no_position" and "Autobús" not in str(legend.render()))
+        assert not widget.stale and BUS_COLORS["B"] not in widget.symbols
+        assert "No se pudo actualizar" not in str(note.render())
+        assert "horario" in str(screen.query_one("#map-stops").render())
+        assert "Queda" not in str(legend.render())
+        await pilot.press("r")
+        await _wait(pilot, lambda: widget.tracking is t and "Autobús" in str(legend.render()))
+        before = widget.render()
+        widget._tick()
+        assert widget.render() != before
+
+
 @pytest.mark.parametrize("case", ["sin salida", "sin destino", "orden inverso", "dos compatibles"])
 def test_itinerario_no_identificado_no_atribuye_gps(fake_tracking, case):
     route = _route()
@@ -681,7 +906,7 @@ async def test_segundo_tramo_conserva_expedicion_al_actualizar(fake_tracking, mo
         assert screen.tracking.leg.service == "second"
 
 
-async def test_desde_busqueda_fija_el_tramo_y_descarta_un_recorrido_incompatible(fake_tracking, monkeypatch):
+async def test_desde_busqueda_fija_el_tramo_y_retira_del_mapa_un_recorrido_incompatible(fake_tracking, monkeypatch):
     from test_tui import JOURNEYS, STATIONS, _req
 
     import alsa.tui.app as app_module
@@ -701,12 +926,14 @@ async def test_desde_busqueda_fija_el_tramo_y_descarta_un_recorrido_incompatible
         app.push_screen(screen)
         await _wait(pilot, lambda: screen.tracking is not None)
         assert screen.tracking.leg.service == "A"
+        await pilot.press("right")
+        assert screen.view == "mapa"
         trips.reverse()
         other["legs"][0]["arrivalTime"] = "12:45"
         routes["A"]["itinerario"].pop(0)
         await pilot.press("r")
         await _wait(pilot, lambda: screen.tracking.status == "unmatched_route")
-        assert not screen.query_one("#map").display
+        assert screen.view == "ruta" and not screen.query_one("#map").display
         assert "No se ha podido identificar el recorrido" in str(screen.query_one("#tracking-headline").render())
         assert [c[tracking.TRACKING_NS + "service"] for c in _service_calls(sessions[-1])] == ["A"]
 

@@ -179,7 +179,13 @@ come back without tracking, exactly as on alsa.es.
 3. In the results: `o` sorts by time, price or duration; `a` / `s` move to the previous / next day; `t`
    turns the time filter off and on (if you set a time); `p` hides sold-out buses, if any (they're greyed
    out and can't be bought); `l` shows where today's bus is (the detail says when it's on the road): the
-   road with the bus, its delay and your stops, refreshed every minute, with `m` to open it on a map.
+   road with the bus, its delay and your stops, refreshed every minute. `→` switches to a pixel-art map
+   of Spain with each autonomous community in its colour, the bus, your trip (blue behind, yellow
+   ahead), its stops and the rest of the bus's route; `z` zooms between your trip and the whole country
+   and `←` goes back. The legend shows the marks visible at that zoom. Below it, `↑` and `↓` scroll through
+   the remaining stops up to your destination, with names and estimated times (≈). If the position is
+   uncertain, the panel shows scheduled times. If a refresh fails, the map keeps the last reading,
+   shows its consultation time and pauses the bus’s blinking halo. `m` opens the position on OpenStreetMap.
    Anywhere, `?` shows the help and `ctrl+q` quits.
 4. Enter on a bus shows its real fares on alsa.es (Básica, Flexible, Superflexible) with their price.
 5. When you pick a fare, the TUI opens Chrome with its own profile (`~/.cache/alsa-cli/chrome`), runs the
@@ -271,6 +277,12 @@ uvx ruff check .
 - Never commit real passenger or booking data, HAR captures, tickets or tokens.
 
 To contribute, open an issue first and then a pull request that closes it: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Map data
+
+The TUI's map is made from [Natural Earth](https://www.naturalearthdata.com/) 1:10m admin-1 states and
+provinces, which is in the public domain, simplified to about 1 km (`src/alsa/tui/map_es.json`, 66 KB).
+`scripts/build_map.py` explains how to regenerate it.
 
 ## License
 
