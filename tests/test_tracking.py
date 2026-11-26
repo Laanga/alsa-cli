@@ -728,3 +728,82 @@ async def test_mcp_recorrido_ambiguo_devuelve_posicion_nula(fake_tracking):
         result = await client.call_tool("track_bus", {"origin": "90155", "destination": "90186", "departure_time": "06:15"})
     bus = result.structured_content["buses"][0]
     assert bus["status"] == "unmatched_route" and bus["position"] is None
+
+
+# --- tramos largos sin paradas ----------------------------------------------------------
+
+# Madrid Moncloa 12:15 → Pola de Lena 17:05 sin paradas intermedias (Alsa, 26/11/2026). La
+# carretera real (A-6 y A-66) se separa hasta 47 km de la recta entre las dos paradas.
+LONG_STRETCH = {
+    "codLinea": "18541",
+    "nomLinea": "MADRID-CyL-ASTURIAS",
+    "nomOrigen": "MADRID MONCLOA",
+    "nomDestino": "OVIEDO",
+    "buses": [],
+    "itinerario": [
+        {"nomPueblo": "MADRID MONCLOA", "parada": "INTERCAMBIADOR MONCLOA", "pueblo": "5558", "fecha": "20261126",
+         "hllegada": "12:15", "hsalida": "12:15", "latitud": "40.434737411", "longitud": "-3.719566949"},
+        {"nomPueblo": "POLA DE LENA", "parada": "MARQUESINA", "pueblo": "210", "fecha": "20261126",
+         "hllegada": "17:05", "hsalida": "17:05", "latitud": "43.16415594", "longitud": "-5.828504271"},
+        {"nomPueblo": "OVIEDO", "parada": "ESTACION DE AUTOBUSES", "pueblo": "186", "fecha": "20261126",
+         "hllegada": "17:30", "hsalida": "17:30", "latitud": "43.369513754", "longitud": "-5.850751649"},
+    ],
+}
+# Puntos de la A-6 y la A-66, de Madrid a Pola de Lena.
+A6 = [(40.4347, -3.7196), (40.64, -4.01), (40.78, -4.41), (40.94, -4.60), (41.07, -4.72), (41.50, -5.00),
+      (41.77, -5.27), (42.00, -5.68), (42.35, -5.60), (42.60, -5.57), (42.85, -5.70), (43.1642, -5.8285)]
+
+
+def _on_the_road(fraction: float) -> tuple[float, float]:
+    """Punto a `fraction` del recorrido por la carretera real."""
+    from alsa.tracking import _distance_km
+
+    lengths = [_distance_km(*a, *b) for a, b in pairwise(A6)]
+    left = fraction * sum(lengths)
+    for (a, b), length in zip(pairwise(A6), lengths, strict=True):
+        if left <= length:
+            f = left / length
+            return a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f
+        left -= length
+    return A6[-1]
+
+
+def _long_stretch_at(lat: float, lon: float):
+    route = json.loads(json.dumps(LONG_STRETCH))
+    route["buses"] = [{"latitud": str(lat), "longitud": str(lon)}]
+    return _parse_vehicle(route)
+
+
+@pytest.mark.parametrize("fraction", [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9])
+def test_tramo_largo_por_la_carretera_real_sigue_localizado(fraction):
+    leg = _leg(origin_id="5558", destination_id="186", dep="12:15", arr="17:30", origin="MADRID MONCLOA", destination="OVIEDO")
+    now = _at("12:15") + (_at("17:05") - _at("12:15")) * fraction  # va exactamente a su hora
+    t = estimate(leg, _long_stretch_at(*_on_the_road(fraction)), now)
+
+    assert t.status == "on_the_way"
+    assert abs(t.delay_minutes) <= 5
+    assert t.approximate == (t.distance_to_route_km > 25)
+
+
+def test_tramo_largo_lejos_de_la_recta_se_marca_aproximado():
+    leg = _leg(origin_id="5558", destination_id="186", dep="12:15", arr="17:30", origin="MADRID MONCLOA", destination="OVIEDO")
+    # La posición real de las 13:26: A-6 a la altura de Adanero, a 35 km de la recta.
+    t = estimate(leg, _long_stretch_at(40.916067795, -4.580293942), _at("13:26"))
+
+    assert t.status == "on_the_way" and t.approximate
+    assert t.to_dict()["approximate"] is True
+    from alsa.tui.tracking import headline
+
+    assert "estimación aproximada" in headline(t).plain and "≈" in headline(t).plain
+
+
+def test_tramo_corto_con_el_gps_a_30_km_sigue_siendo_dudoso():
+    # Mansilla → León son 17 km: el margen se queda en 25 km.
+    t = estimate(_leg(), _parse_vehicle(_route("42.80", "-5.20")), _at("10:30"))
+
+    assert t.status == "off_route" and not t.approximate
+
+
+def test_posicion_normal_no_es_aproximada():
+    t = estimate(_leg(), _parse_vehicle(_route()), _at("10:53"))
+    assert not t.approximate and t.to_dict()["approximate"] is False

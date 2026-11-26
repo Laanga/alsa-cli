@@ -147,7 +147,11 @@ alsa-cli · Madrid → Oviedo · hoy a las 10:53 · en directo
   track this bus), `unmatched_route` (the returned itineraries do not identify a single route that
   visits your departure stop and then your destination, or the service identifiers are missing),
   `no_position` (no GPS right now), `off_route` (the GPS is too far from the route to
-  estimate anything) or `not_checked`.
+  estimate anything: more than 25 km, or 20% of a long stretch without stops) or `not_checked`.
+- `approximate`: `true` when the GPS is more than 25 km from the straight line between the two stops
+  around it. That happens on long stretches without stops, where the road strays from that line (up to
+  47 km between Madrid and Pola de Lena on the A-6). The position is still used, up to 20% of the
+  stretch's length away, but the delay and times are rougher.
 - `delay_minutes`: positive when late. It can be negative when the bus is ahead of its timetable; it
   waits at the next stop, so the text output shows it as on time.
 - `estimated_departure` (from your stop, while it's still coming) and `estimated_arrival` (at yours).

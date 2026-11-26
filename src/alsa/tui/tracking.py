@@ -117,7 +117,7 @@ def headline(t: BusTracking) -> Text:
     else:
         text.append("En camino", "bold")
     text.append("  ·  ")
-    text.append(fmt.delay(late), fmt.delay_style(late))
+    text.append(("≈ " if t.approximate else "") + fmt.delay(late), fmt.delay_style(late))
     if t.next_stop is not None:
         upcoming = stops[t.next_stop]
         if t.at_stop:
@@ -129,6 +129,8 @@ def headline(t: BusTracking) -> Text:
             text.append(f"  ·  próxima parada {fmt.place(upcoming.town)}", "dim")
             if t.distance_to_next_km is not None:
                 text.append(f" a {fmt.km(t.distance_to_next_km)}", "dim")
+    if t.approximate:
+        text.append("  ·  estimación aproximada: tramo largo sin paradas", "dim italic")
     return text
 
 

@@ -41,7 +41,11 @@ TRACKING_NS = "_TrackingBusPortlet_WAR_Alsaportlet_"
 CHECK_BEFORE = timedelta(hours=3)
 CHECK_AFTER = timedelta(minutes=30)
 
-MAX_OFF_ROUTE_KM = 25.0  # más lejos de la ruta, la posición no sirve para estimar
+MAX_OFF_ROUTE_KM = 25.0  # más lejos de la ruta, la posición no sirve para estimar…
+# …salvo en tramos largos sin paradas, donde la carretera se separa mucho de la recta entre
+# ellas (Madrid-Pola de Lena por la A-6: hasta 47 km en 351 km). Ahí se admite hasta este
+# porcentaje del tramo y el retraso se marca como aproximado.
+OFF_ROUTE_SHARE = 0.2
 MAX_DELAY_MINUTES = 240  # más retraso que esto es casi seguro un error de cálculo
 TIME_WEIGHT_KM_PER_MIN = 0.1  # desempata tramos cercanos por cercanía al horario
 
@@ -270,6 +274,12 @@ class _Fix:
     at_stop: bool
     distance_km: float
     scheduled: datetime  # hora a la que el horario pasa por ese punto
+    segment_km: float = 0.0  # longitud en línea recta del tramo; 0 si está en una parada
+
+    @property
+    def allowed_km(self) -> float:
+        """Lo lejos de la recta que puede estar el GPS para que la posición siga valiendo."""
+        return max(MAX_OFF_ROUTE_KM, OFF_ROUTE_SHARE * self.segment_km)
 
 
 def _xy(lat: float, lon: float, lat0: float) -> tuple[float, float]:
@@ -308,7 +318,7 @@ def _locate(vehicle: Vehicle, now: datetime) -> _Fix | None:
         start, end = vehicle.stops[i].departure, vehicle.stops[j].arrival
         scheduled = start + (end - start) * t
         point = (here[0] + t * dx, here[1] + t * dy)
-        candidates.append(_Fix(i + t * (j - i), False, math.dist(bus, point), scheduled))
+        candidates.append(_Fix(i + t * (j - i), False, math.dist(bus, point), scheduled, math.sqrt(length2)))
 
     def score(fix: _Fix) -> float:
         return fix.distance_km + TIME_WEIGHT_KM_PER_MIN * abs((now - fix.scheduled).total_seconds()) / 60
@@ -338,7 +348,7 @@ def estimate(leg: TrackedLeg, vehicle: Vehicle | None, now: datetime) -> BusTrac
     if fix is None:
         return replace(base, status="no_position")
     delay = round((now - fix.scheduled).total_seconds() / 60)
-    if fix.distance_km > MAX_OFF_ROUTE_KM or abs(delay) > MAX_DELAY_MINUTES:
+    if fix.distance_km > fix.allowed_km or abs(delay) > MAX_DELAY_MINUTES:
         return replace(base, status="off_route", distance_to_route_km=round(fix.distance_km, 1))
 
     if fix.position == 0 and now < stops[0].departure:
@@ -376,6 +386,7 @@ def estimate(leg: TrackedLeg, vehicle: Vehicle | None, now: datetime) -> BusTrac
         next_stop=next_stop,
         distance_to_next_km=distance_next,
         distance_to_route_km=round(fix.distance_km, 1),
+        approximate=fix.distance_km > MAX_OFF_ROUTE_KM,
         progress=round(progress, 3),
         estimated_departure=None if status in ("on_the_way", "arrived") else stops[origin].departure + late,
         estimated_arrival=None if status == "arrived" else leg_end + late,

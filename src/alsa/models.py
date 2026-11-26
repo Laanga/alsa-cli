@@ -170,6 +170,7 @@ class BusTracking:
     next_stop: int | None = None
     distance_to_next_km: float | None = None
     distance_to_route_km: float | None = None
+    approximate: bool = False  # el GPS está lejos de la recta entre paradas (tramo largo): estimación gruesa
     origin_stop: int | None = None  # índice de tu parada de salida en el recorrido
     destination_stop: int | None = None
     progress: float | None = None  # 0 a 1 entre tu salida y tu llegada
@@ -210,6 +211,7 @@ class BusTracking:
             "legs": leg.legs,
             "status": self.status,
             "delay_minutes": self.delay_minutes,
+            "approximate": self.approximate,
             "estimated_departure": _iso(self.estimated_departure),
             "estimated_arrival": _iso(self.estimated_arrival),
             "progress": self.progress,
