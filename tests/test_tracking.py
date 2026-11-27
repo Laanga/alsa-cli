@@ -485,8 +485,16 @@ def live_app(monkeypatch):
         asked.append(args)
         return [on_the_way, no_tracking, later], []
 
+    class FrozenClock(datetime):
+        """The fake coaches run on TODAY, so the screen must think it's that morning too."""
+
+        @classmethod
+        def now(cls, tz=None):
+            return _at("10:53").astimezone(tz)
+
     monkeypatch.setattr(app_module, "get_all_stations", lambda: STATIONS)
     monkeypatch.setattr(tui_tracking, "track_route", fake_track)
+    monkeypatch.setattr(tui_tracking, "datetime", FrozenClock)
     return app_module.AlsaApp, asked
 
 
